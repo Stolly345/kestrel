@@ -6,8 +6,8 @@
 use crate::fileops::Ops;
 use crate::search::{SearchError, SearchModel};
 use adw::prelude::*;
-use kestrel_index::Sort;
 use gtk::{gdk, gio, glib, graphene};
+use kestrel_index::Sort;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -170,8 +170,17 @@ fn type_text(desc: &str, ext: Option<&str>, style: crate::prefs::TypeStyle) -> S
             // "Microsoft Excel Worksheet" -> "Excel", "JPEG image" -> "JPEG", "Tar archive (gzip-compressed)" -> "Tar"
             let d = desc.split(" (").next().unwrap_or(desc);
             let d = d.strip_prefix("Microsoft ").unwrap_or(d);
-            const GENERIC: [&str; 9] =
-                ["document", "worksheet", "spreadsheet", "presentation", "image", "video", "audio", "archive", "file"];
+            const GENERIC: [&str; 9] = [
+                "document",
+                "worksheet",
+                "spreadsheet",
+                "presentation",
+                "image",
+                "video",
+                "audio",
+                "archive",
+                "file",
+            ];
             match d.rsplit_once(' ') {
                 Some((head, last)) if GENERIC.contains(&last.to_lowercase().as_str()) => head.to_string(),
                 _ => d.to_string(),
@@ -969,7 +978,8 @@ impl Browser {
         let mut i = 0;
         while let Some(t) = title {
             if t.is_visible()
-                && t.compute_bounds(&self.list).is_some_and(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
+                && t.compute_bounds(&self.list)
+                    .is_some_and(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
             {
                 let c = cols.item(i).and_downcast::<gtk::ColumnViewColumn>()?;
                 return self.opt_cols.iter().any(|(_, o)| *o == c).then_some(c);
@@ -994,7 +1004,11 @@ impl Browser {
                 .filter_map(|i| cols.item(i).and_downcast::<gtk::ColumnViewColumn>())
                 .filter_map(|c| {
                     let (id, _) = b.opt_cols.iter().find(|(_, x)| *x == c)?;
-                    Some(crate::prefs::ColumnPref { id: id.to_string(), visible: c.is_visible(), width: c.fixed_width() })
+                    Some(crate::prefs::ColumnPref {
+                        id: id.to_string(),
+                        visible: c.is_visible(),
+                        width: c.fixed_width(),
+                    })
                 })
                 .collect();
             crate::prefs::update(|s| s.columns = order);

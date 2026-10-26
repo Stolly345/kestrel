@@ -19,7 +19,14 @@ pub struct ColumnPref {
 pub const COLUMNS: [(&str, &str, i32); 3] = [("size", "Size", 90), ("modified", "Modified", 170), ("type", "Type", 220)];
 
 fn default_columns() -> Vec<ColumnPref> {
-    COLUMNS.iter().map(|&(id, _, width)| ColumnPref { id: id.into(), visible: true, width }).collect()
+    COLUMNS
+        .iter()
+        .map(|&(id, _, width)| ColumnPref {
+            id: id.into(),
+            visible: true,
+            width,
+        })
+        .collect()
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -78,7 +85,10 @@ impl Settings {
         let mut out: Vec<ColumnPref> = Vec::new();
         for c in &self.columns {
             if COLUMNS.iter().any(|(id, ..)| *id == c.id) && !out.iter().any(|o| o.id == c.id) {
-                out.push(ColumnPref { width: c.width.clamp(40, 1000), ..c.clone() });
+                out.push(ColumnPref {
+                    width: c.width.clamp(40, 1000),
+                    ..c.clone()
+                });
             }
         }
         for d in default_columns() {
@@ -98,8 +108,7 @@ fn system_12h() -> bool {
     static H12: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *H12.get_or_init(|| {
         let id = "org.gnome.desktop.interface";
-        gio::SettingsSchemaSource::default().and_then(|s| s.lookup(id, true)).is_some()
-            && gio::Settings::new(id).string("clock-format") == "12h"
+        gio::SettingsSchemaSource::default().and_then(|s| s.lookup(id, true)).is_some() && gio::Settings::new(id).string("clock-format") == "12h"
     })
 }
 
@@ -240,7 +249,10 @@ fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
             let (id, ch2) = (c.id.clone(), ch.clone());
             width.connect_value_changed(move |w| {
                 let v = w.value() as i32;
-                ch2(&|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.width = v), false);
+                ch2(
+                    &|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.width = v),
+                    false,
+                );
             });
             let arrow = |icon: &str, tip: &str, ok: bool, delta: isize| {
                 let b = gtk::Button::builder()
@@ -259,11 +271,18 @@ fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
             };
             let up = arrow("go-up-symbolic", "Move left", i > 0, -1);
             let down = arrow("go-down-symbolic", "Move right", i + 1 < n, 1);
-            let show = gtk::Switch::builder().active(c.visible).valign(gtk::Align::Center).tooltip_text("Show this column").build();
+            let show = gtk::Switch::builder()
+                .active(c.visible)
+                .valign(gtk::Align::Center)
+                .tooltip_text("Show this column")
+                .build();
             let (id, ch4) = (c.id.clone(), ch.clone());
             show.connect_active_notify(move |s| {
                 let on = s.is_active();
-                ch4(&|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.visible = on), false);
+                ch4(
+                    &|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.visible = on),
+                    false,
+                );
             });
             for w in [width.upcast_ref::<gtk::Widget>(), up.upcast_ref(), down.upcast_ref(), show.upcast_ref()] {
                 row.add_suffix(w);
@@ -286,12 +305,7 @@ fn switch(title: &str, subtitle: &str, on: bool) -> adw::SwitchRow {
 
 /// `on_change` lets the window react (hidden files, etc.); `toast` reports results.
 /// `on_change`: display settings changed (re-list); `on_columns`: column layout changed (cheap, live).
-pub fn show(
-    parent: &adw::ApplicationWindow,
-    on_change: impl Fn() + 'static,
-    on_columns: impl Fn() + 'static,
-    toast: impl Fn(&str) + Clone + 'static,
-) {
+pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_columns: impl Fn() + 'static, toast: impl Fn(&str) + Clone + 'static) {
     let s = get();
     let on_change = std::rc::Rc::new(on_change);
     let dialog = adw::PreferencesDialog::builder().search_enabled(false).build();
@@ -315,7 +329,11 @@ pub fn show(
     let clock = combo(
         "Time format",
         "For Modified times in file lists",
-        &[if system_12h() { "Follow System (12-hour)" } else { "Follow System (24-hour)" }, "24-hour", "12-hour"],
+        &[
+            if system_12h() { "Follow System (12-hour)" } else { "Follow System (24-hour)" },
+            "24-hour",
+            "12-hour",
+        ],
         clocks.iter().position(|x| *x == s.clock).unwrap_or(0) as u32,
     );
     let oc = on_change.clone();

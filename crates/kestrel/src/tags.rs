@@ -1,9 +1,9 @@
 //! Color tags: the `user.chimera.tags` xattr ("red,blue"), which the index also reads for `tag:`.
 
-use kestrel_index::{TAG_XATTR, TAGS, tag_bits};
 use gtk::gio;
 use gtk::glib::prelude::*;
 use gtk::prelude::*;
+use kestrel_index::{TAG_XATTR, TAGS, tag_bits};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 
@@ -80,7 +80,16 @@ pub fn toggle(files: &[gio::File], t: &str) -> std::io::Result<()> {
     let all = files.iter().all(|f| read(f) & bit != 0);
     for f in files {
         let cur = read(f);
-        write(f, if t == "none" { 0 } else if all { cur & !bit } else { cur | bit })?;
+        write(
+            f,
+            if t == "none" {
+                0
+            } else if all {
+                cur & !bit
+            } else {
+                cur | bit
+            },
+        )?;
     }
     Ok(())
 }
@@ -122,6 +131,10 @@ pub fn set_picker(row: &gtk::Box, bits: u8) {
                 dot.remove(&img);
             }
         }
-        btn.update_state(&[gtk::accessible::State::Pressed(if on { gtk::AccessibleTristate::True } else { gtk::AccessibleTristate::False })]);
+        btn.update_state(&[gtk::accessible::State::Pressed(if on {
+            gtk::AccessibleTristate::True
+        } else {
+            gtk::AccessibleTristate::False
+        })]);
     }
 }

@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
@@ -40,10 +40,38 @@ pub struct Transferred {
     pub replaced: Vec<PathBuf>,
 }
 
-#[derive(Default)]
 struct Progress {
     done: AtomicU64,
     total: AtomicU64,
+    /// Set by work that can stop midway (extracting): shows the Cancel button.
+    can_cancel: AtomicBool,
+    cancel: gio::Cancellable,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Progress {
+            done: AtomicU64::default(),
+            total: AtomicU64::default(),
+            can_cancel: AtomicBool::default(),
+            cancel: gio::Cancellable::new(),
+        }
+    }
+}
+
+/// Run `wait` (which waits for process `pid`) with the Cancel button able to kill it. SIGKILL
+/// to the outer bwrap takes the sandbox down with it (--die-with-parent).
+fn killable<T>(p: &Progress, pid: u32, wait: impl FnOnce() -> T) -> T {
+    p.can_cancel.store(true, Ordering::Relaxed);
+    let id = p.cancel.connect_cancelled(move |_| unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    });
+    let r = wait();
+    if let Some(id) = id {
+        p.cancel.disconnect_cancelled(id);
+    }
+    p.can_cancel.store(false, Ordering::Relaxed);
+    r
 }
 
 const NOFOLLOW: gio::FileQueryInfoFlags = gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS;
@@ -375,8 +403,10 @@ fn run_undo(u: Undo) -> Result<String, String> {
 
 pub struct Ops {
     pub toasts: adw::ToastOverlay,
-    /// Shown in the header bar while a job runs.
-    pub progress: gtk::ProgressBar,
+    /// Shown under the header while a job runs: the progress bar, plus Cancel when the job can stop.
+    pub bar: gtk::Box,
+    progress: gtk::ProgressBar,
+    cancel: gtk::Button,
     undo: RefCell<Vec<Undo>>,
 }
 
@@ -387,18 +417,74 @@ pub struct Ops {
 /// Keep in sync with docs/extract-formats.md.
 pub const ARCHIVE_EXTS: &[&str] = &[
     // tarballs (system tar, sandboxed)
-    ".tar.gz", ".tar.xz", ".tar.zst", ".tar.bz2", ".tar.z", ".tgz", ".tpz", ".txz", ".tzst", ".tbz2", ".tbz",
-    ".taz", ".tar", ".ova",
+    ".tar.gz",
+    ".tar.xz",
+    ".tar.zst",
+    ".tar.bz2",
+    ".tar.z",
+    ".tgz",
+    ".tpz",
+    ".txz",
+    ".tzst",
+    ".tbz2",
+    ".tbz",
+    ".taz",
+    ".tar",
+    ".ova",
     // archives
-    ".7z", ".zip", ".zipx", ".rar", ".cab", ".arj", ".lzh", ".lha", ".cpio", ".xar", ".wim", ".swm", ".esd",
-    ".chm", ".z01", ".001",
+    ".7z",
+    ".zip",
+    ".zipx",
+    ".rar",
+    ".cab",
+    ".arj",
+    ".lzh",
+    ".lha",
+    ".cpio",
+    ".xar",
+    ".wim",
+    ".swm",
+    ".esd",
+    ".chm",
+    ".z01",
+    ".001",
     // single-file compression
-    ".gz", ".gzip", ".xz", ".bz2", ".bzip2", ".zst", ".lzma", ".z",
+    ".gz",
+    ".gzip",
+    ".xz",
+    ".bz2",
+    ".bzip2",
+    ".zst",
+    ".lzma",
+    ".z",
     // packages and installers
-    ".deb", ".udeb", ".rpm", ".msi", ".msp", ".apk", ".jar", ".xpi", ".ipa", ".appx", ".pkg",
+    ".deb",
+    ".udeb",
+    ".rpm",
+    ".msi",
+    ".msp",
+    ".apk",
+    ".jar",
+    ".xpi",
+    ".ipa",
+    ".appx",
+    ".pkg",
     // disk and file-system images
-    ".iso", ".img", ".dmg", ".udf", ".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2", ".squashfs",
-    ".cramfs", ".hfs", ".hfsx", ".simg",
+    ".iso",
+    ".img",
+    ".dmg",
+    ".udf",
+    ".vhd",
+    ".vhdx",
+    ".vmdk",
+    ".vdi",
+    ".qcow",
+    ".qcow2",
+    ".squashfs",
+    ".cramfs",
+    ".hfs",
+    ".hfsx",
+    ".simg",
 ];
 
 /// The `ARCHIVE_EXTS` entry `name` ends with, if any.
@@ -408,14 +494,20 @@ pub fn archive_ext(name: &str) -> Option<&'static str> {
 }
 
 fn is_tarball(lower: &str) -> bool {
-    [".tar", ".tar.gz", ".tgz", ".tpz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tbz", ".tar.z", ".taz", ".ova"]
-        .iter()
-        .any(|e| lower.ends_with(e))
+    [
+        ".tar", ".tar.gz", ".tgz", ".tpz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tbz", ".tar.z", ".taz", ".ova",
+    ]
+    .iter()
+    .any(|e| lower.ends_with(e))
 }
 
 /// Run a command; on failure return its last stderr line.
 fn run(mut cmd: std::process::Command) -> Result<(), String> {
     let out = cmd.stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
+    check(out)
+}
+
+fn check(out: std::process::Output) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
@@ -452,10 +544,93 @@ pub(crate) fn sandboxed(prog: &str, archive: &Path, out: &Path) -> std::process:
     c
 }
 
-/// Why 7-Zip failed: a missing/wrong password (ask for one) or anything else.
+/// One entry of an archive listing.
+pub struct Entry {
+    pub path: String,
+    pub size: u64,
+    pub dir: bool,
+}
+
+/// What's inside `archive` (canonical path), listed in the sandbox; `scratch` is the empty
+/// writable dir the sandbox needs. Tarballs go through tar (7-Zip would show the one .tar inside).
+pub fn list_archive(archive: &Path, scratch: &Path) -> Result<Vec<Entry>, String> {
+    let name = archive.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    let tar = is_tarball(&name);
+    let mut c = if tar {
+        let mut c = sandboxed("tar", archive, scratch);
+        c.arg("-tvf").arg(archive);
+        c
+    } else {
+        let mut c = sandboxed(&seven_zip(), archive, scratch);
+        c.args(["l", "-slt", "-p", "--"]).arg(archive);
+        c
+    };
+    let out = c.stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() {
+        let msg = format!("{text}{}", String::from_utf8_lossy(&out.stderr)).to_lowercase();
+        return Err(if msg.contains("encrypted") || msg.contains("password") {
+            "Encrypted archive".into()
+        } else {
+            "Couldn't read this archive".into()
+        });
+    }
+    Ok(if tar { parse_tar_tv(&text) } else { parse_7z_slt(&text) })
+}
+
+/// `tar -tv` lines: "drwxr-xr-x user/group 0 2026-10-26 08:25 d/sub/".
+fn parse_tar_tv(text: &str) -> Vec<Entry> {
+    text.lines()
+        .filter_map(|l| {
+            let mut rest = l;
+            let mut tok = Vec::new();
+            for _ in 0..5 {
+                rest = rest.trim_start();
+                let end = rest.find(char::is_whitespace)?;
+                tok.push(&rest[..end]);
+                rest = &rest[end..];
+            }
+            let path = rest.trim_start().split(" -> ").next()?.trim_end_matches('/');
+            Some(Entry {
+                path: path.into(),
+                size: tok[2].parse().unwrap_or(0),
+                dir: tok[0].starts_with('d'),
+            })
+        })
+        .filter(|e| !e.path.is_empty())
+        .collect()
+}
+
+/// `7zz l -slt` blocks ("Path = …", "Folder = +", "Size = …") after the "----------" line.
+fn parse_7z_slt(text: &str) -> Vec<Entry> {
+    let Some((_, body)) = text.split_once("\n----------\n") else {
+        return Vec::new();
+    };
+    body.split("\n\n")
+        .filter_map(|block| {
+            let field = |k: &str| block.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(" = "));
+            Some(Entry {
+                path: field("Path")?.to_string(),
+                size: field("Size").and_then(|s| s.parse().ok()).unwrap_or(0),
+                dir: field("Folder") == Some("+") || field("Attributes").is_some_and(|a| a.starts_with('D')),
+            })
+        })
+        .collect()
+}
+
+/// Why extracting failed: a missing/wrong password (ask for one), the Cancel button, or anything else.
 enum ExtractErr {
     Password,
+    Cancelled,
     Other(String),
+}
+
+/// The archive unpacked in a hidden staging folder `tmp`: `src` still has to land in the
+/// destination as `name`.
+struct Unpacked {
+    tmp: PathBuf,
+    src: gio::File,
+    name: String,
 }
 
 /// Extract `archive` into `out` with the sandboxed 7-Zip, feeding its percentage to the
@@ -478,17 +653,21 @@ fn run_7z(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<
     p.total.store(100, Ordering::Relaxed);
     let mut so = child.stdout.take().unwrap();
     let (mut buf, mut msgs) = ([0u8; 4096], String::new());
-    while let Ok(n @ 1..) = so.read(&mut buf) {
-        // progress redraws in place with backspaces: "  42% 3 - name"
-        for seg in String::from_utf8_lossy(&buf[..n]).split(['\x08', '\r']) {
-            match seg.trim_start().split_once('%').and_then(|(n, _)| n.parse::<u64>().ok()) {
-                Some(pct) => p.done.store(pct, Ordering::Relaxed),
-                None => msgs.push_str(seg),
+    let ok = killable(p, child.id(), || {
+        while let Ok(n @ 1..) = so.read(&mut buf) {
+            // progress redraws in place with backspaces: "  42% 3 - name"
+            for seg in String::from_utf8_lossy(&buf[..n]).split(['\x08', '\r']) {
+                match seg.trim_start().split_once('%').and_then(|(n, _)| n.parse::<u64>().ok()) {
+                    Some(pct) => p.done.store(pct, Ordering::Relaxed),
+                    None => msgs.push_str(seg),
+                }
             }
         }
-    }
-    let ok = child.wait().is_ok_and(|s| s.success());
-    if ok {
+        child.wait().is_ok_and(|s| s.success())
+    });
+    if p.cancel.is_cancelled() {
+        Err(ExtractErr::Cancelled)
+    } else if ok {
         p.done.store(100, Ordering::Relaxed); // small archives finish before any percentage prints
         Ok(())
     } else if msgs.contains("Wrong password") {
@@ -505,10 +684,25 @@ fn plural(n: usize, one: &str) -> String {
 
 impl Ops {
     pub fn new(toasts: adw::ToastOverlay) -> Rc<Ops> {
-        let progress = gtk::ProgressBar::builder().css_classes(["osd"]).visible(false).build();
+        let progress = gtk::ProgressBar::builder()
+            .css_classes(["osd"])
+            .hexpand(true)
+            .valign(gtk::Align::Center)
+            .build();
+        let cancel = gtk::Button::builder()
+            .icon_name("process-stop-symbolic")
+            .tooltip_text("Cancel")
+            .css_classes(["flat", "circular"])
+            .visible(false)
+            .build();
+        let bar = gtk::Box::builder().spacing(6).visible(false).build();
+        bar.append(&progress);
+        bar.append(&cancel);
         Rc::new(Ops {
             toasts,
+            bar,
             progress,
+            cancel,
             undo: RefCell::default(),
         })
     }
@@ -530,9 +724,11 @@ impl Ops {
     /// Run `work` on a worker thread with a live progress bar, then `then` on the main thread.
     fn job<T: Send + 'static>(self: &Rc<Self>, work: impl FnOnce(&Progress) -> T + Send + 'static, then: impl FnOnce(&Rc<Ops>, T) + 'static) {
         let p = Arc::new(Progress::default());
-        let bar = self.progress.clone();
+        let (bar, cancel) = (self.progress.clone(), self.cancel.clone());
         bar.set_fraction(0.0);
-        bar.set_visible(true);
+        self.bar.set_visible(true);
+        let pc = p.clone();
+        let clicked = cancel.connect_clicked(move |_| pc.cancel.cancel());
         let pw = p.clone();
         let tick = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             let (d, t) = (pw.done.load(Ordering::Relaxed), pw.total.load(Ordering::Relaxed));
@@ -541,13 +737,16 @@ impl Ops {
             } else {
                 bar.pulse();
             }
+            cancel.set_visible(pw.can_cancel.load(Ordering::Relaxed));
             glib::ControlFlow::Continue
         });
         let me = self.clone();
         glib::spawn_future_local(async move {
             let r = gio::spawn_blocking(move || work(&p)).await;
             tick.remove();
-            me.progress.set_visible(false);
+            me.cancel.disconnect(clicked);
+            me.cancel.set_visible(false);
+            me.bar.set_visible(false);
             match r {
                 Ok(v) => then(&me, v),
                 Err(_) => me.toast("Operation crashed"),
@@ -565,8 +764,18 @@ impl Ops {
             self.run_transfer(op, srcs, dest, Conflict::KeepBoth);
             return;
         }
+        let (me, to) = (self.clone(), dest.clone());
+        self.ask_conflict(&clash, &to, move |policy| {
+            if let Some(policy) = policy {
+                me.run_transfer(op, srcs.clone(), dest.clone(), policy);
+            }
+        });
+    }
+
+    /// Skip / Keep Both / Replace for names in `clash` that already exist in `dest`; None on Cancel.
+    fn ask_conflict(&self, clash: &[String], dest: &gio::File, done: impl Fn(Option<Conflict>) + 'static) {
         let folder = dest.basename().map_or_else(|| dest.uri().to_string(), |b| b.to_string_lossy().into_owned());
-        let heading = match clash.as_slice() {
+        let heading = match clash {
             [one] => format!("\u{201c}{one}\u{201d} already exists"),
             many => format!("{} items already exist", many.len()),
         };
@@ -584,15 +793,13 @@ impl Ops {
         d.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
         d.set_default_response(Some("keep"));
         d.set_close_response("cancel");
-        let me = self.clone();
         d.connect_response(None, move |_, r| {
-            let policy = match r {
-                "skip" => Conflict::Skip,
-                "keep" => Conflict::KeepBoth,
-                "replace" => Conflict::Replace,
-                _ => return,
-            };
-            me.run_transfer(op, srcs.clone(), dest.clone(), policy);
+            done(match r {
+                "skip" => Some(Conflict::Skip),
+                "keep" => Some(Conflict::KeepBoth),
+                "replace" => Some(Conflict::Replace),
+                _ => None,
+            })
         });
         d.present(self.window().as_ref());
     }
@@ -869,7 +1076,7 @@ impl Ops {
         let had_pw = pw.is_some();
         let retry = file.clone();
         self.job(
-            move |p| -> Result<gio::File, ExtractErr> {
+            move |p| -> Result<Unpacked, ExtractErr> {
                 let other = |e: std::io::Error| ExtractErr::Other(e.to_string());
                 let tpath = tmp.path().ok_or(ExtractErr::Other("no path".into()))?;
                 std::fs::create_dir(&tpath).map_err(other)?;
@@ -877,7 +1084,17 @@ impl Ops {
                 let r = if is_tarball(&lower) {
                     let mut c = sandboxed("tar", &path, &tpath);
                     c.arg("-xf").arg(&path).arg("-C").arg(&tpath);
-                    run(c).map_err(ExtractErr::Other)
+                    c.stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::piped());
+                    match c.spawn() {
+                        Ok(child) => match killable(p, child.id(), || child.wait_with_output()) {
+                            _ if p.cancel.is_cancelled() => Err(ExtractErr::Cancelled),
+                            Ok(out) => check(out).map_err(ExtractErr::Other),
+                            Err(e) => Err(other(e)),
+                        },
+                        Err(e) => Err(other(e)),
+                    }
                 } else {
                     run_7z(&path, &tpath, pw.as_deref(), p)
                 };
@@ -886,24 +1103,78 @@ impl Ops {
                     return Err(e);
                 }
                 let entries: Vec<_> = std::fs::read_dir(&tpath).map_err(other)?.flatten().collect();
-                let (src, want) = match entries.as_slice() {
+                let (src, name) = match entries.as_slice() {
                     [one] => (gio::File::for_path(one.path()), one.file_name().to_string_lossy().into_owned()),
                     _ => (tmp.clone(), final_name),
                 };
-                let dest = unique_child(&dir, &want);
-                src.move_(&dest, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None)
-                    .map_err(|e| ExtractErr::Other(e.message().to_string()))?;
-                let _ = std::fs::remove_dir(&tpath);
-                Ok(dest)
+                Ok(Unpacked { tmp: tpath, src, name })
             },
             move |me, r| match r {
-                Ok(dest) => me.toast_undo(&format!("Extracted {}", dest.basename().unwrap_or_default().display()), Undo::Created(dest)),
+                Ok(u) if !dir.child(&u.name).query_exists(gio::Cancellable::NONE) => me.land(u, dir, Conflict::KeepBoth),
+                Ok(u) => {
+                    let (m, d) = (me.clone(), dir.clone());
+                    let clash = [u.name.clone()];
+                    let u = RefCell::new(Some(u));
+                    me.ask_conflict(&clash, &dir, move |policy| {
+                        if let Some(u) = u.take() {
+                            m.land(u, d.clone(), policy.unwrap_or(Conflict::Skip));
+                        }
+                    });
+                }
                 Err(ExtractErr::Password) => {
                     let title = if had_pw { "Wrong Password" } else { "Password Required" };
                     let m = me.clone();
                     me.ask_password(title, &name, move |pw| m.extract_pw(retry.clone(), Some(pw), into.clone()));
                 }
+                Err(ExtractErr::Cancelled) => me.toast("Extract cancelled"),
                 Err(ExtractErr::Other(e)) => me.toast(&format!("Extract failed: {e}")),
+            },
+        );
+    }
+
+    /// Move an unpacked archive from its staging folder into `dir`, resolving a name clash
+    /// with `policy` (Skip throws the unpacked copy away).
+    fn land(self: &Rc<Self>, u: Unpacked, dir: gio::File, policy: Conflict) {
+        self.job(
+            move |_| -> Result<Option<(gio::File, Option<PathBuf>)>, String> {
+                let target = dir.child(&u.name);
+                let mut replaced = None;
+                let dest = if !target.query_exists(gio::Cancellable::NONE) {
+                    target
+                } else {
+                    match policy {
+                        Conflict::KeepBoth => unique_child(&dir, &u.name),
+                        Conflict::Skip => {
+                            let _ = std::fs::remove_dir_all(&u.tmp);
+                            return Ok(None);
+                        }
+                        Conflict::Replace => {
+                            target.trash(gio::Cancellable::NONE).map_err(|e| format!("{}: {}", u.name, e.message()))?;
+                            replaced = target.path();
+                            target
+                        }
+                    }
+                };
+                let r = u.src.move_(&dest, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None);
+                // the staging folder is gone if it was moved itself; otherwise it holds nothing we want
+                let _ = std::fs::remove_dir_all(&u.tmp);
+                r.map_err(|e| e.message().to_string())?;
+                Ok(Some((dest, replaced)))
+            },
+            |me, r| match r {
+                Ok(None) => me.toast("Nothing extracted"),
+                Ok(Some((dest, replaced))) => {
+                    let mut msg = format!("Extracted {}", dest.basename().unwrap_or_default().display());
+                    let undo = match replaced {
+                        Some(old) => {
+                            msg += ", replaced 1";
+                            Undo::Many(vec![Undo::Created(dest), Undo::Trashed(vec![old])])
+                        }
+                        None => Undo::Created(dest),
+                    };
+                    me.toast_undo(&msg, undo);
+                }
+                Err(e) => me.toast(&format!("Extract failed: {e}")),
             },
         );
     }
@@ -1171,6 +1442,23 @@ mod tests {
         assert!(matches!(x("enc.7z", Some("nope")), Err(ExtractErr::Password)));
         assert!(x("enc.7z", Some("secret")).is_ok());
         assert_eq!(p.done.load(Ordering::Relaxed), 100);
+        // Cancel kills the sandbox (a cancel before it starts kills it at once)
+        let c = Progress::default();
+        c.cancel.cancel();
+        assert!(matches!(run_7z(&d.join("plain.zip"), &out, None, &c), Err(ExtractErr::Cancelled)));
+        assert!(!c.can_cancel.load(Ordering::Relaxed));
+        // listings, in the sandbox
+        std::fs::create_dir(d.join("sub")).unwrap();
+        std::fs::write(d.join("sub/b.txt"), "yo!").unwrap();
+        mk(&["a", "tree.zip", "sub"]);
+        assert!(std::process::Command::new("tar").current_dir(&d).args(["-czf", "tree.tar.gz", "sub"]).status().unwrap().success());
+        for arc in ["tree.zip", "tree.tar.gz"] {
+            let l = list_archive(&d.join(arc), &out).unwrap();
+            assert_eq!(l.len(), 2, "{arc}");
+            assert!(l.iter().any(|e| e.path == "sub" && e.dir), "{arc}");
+            assert!(l.iter().any(|e| e.path == "sub/b.txt" && !e.dir && e.size == 3), "{arc}");
+        }
+        assert_eq!(list_archive(&d.join("enc.7z"), &out).err().as_deref(), Some("Encrypted archive"));
         // the sandbox itself: writes outside `out` are refused, home is hidden
         let mut c = sandboxed("/bin/sh", &d.join("plain.zip"), &out);
         c.args(["-c", &format!("echo x > {}/escaped; ls $HOME", d.display())]);

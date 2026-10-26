@@ -67,19 +67,81 @@ fn is_office(ct: &str) -> bool {
 /// count. Pages render one at a time as they're viewed, into `dir`
 /// (~/.cache/kestrel/preview/<hash of path, size, mtime>). LibreOffice and Poppler parse hostile
 /// files, so both run in the archive sandbox (no network, no home, only `dir` writable).
-// ponytail: cache is never pruned; add an LRU sweep if ~/.cache/kestrel/preview grows large
 struct Doc {
     pdf: std::path::PathBuf,
     dir: std::path::PathBuf,
     pages: u32,
 }
 
+fn cache_root() -> std::path::PathBuf {
+    glib::user_cache_dir().join("kestrel/preview")
+}
+
+const CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 86400);
+const CACHE_MAX_BYTES: u64 = 512 << 20;
+
+/// Drop document caches not viewed for 30 days, then the least recently viewed until the
+/// whole cache is under 512 MB.
+fn prune(root: &std::path::Path, max_age: std::time::Duration, max_bytes: u64) {
+    let Ok(rd) = std::fs::read_dir(root) else { return };
+    let now = std::time::SystemTime::now();
+    let mut dirs: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let used = e.metadata().ok()?.modified().ok()?;
+            // flat: doc.pdf, pages, p<N>.png
+            let bytes = std::fs::read_dir(e.path())
+                .ok()?
+                .flatten()
+                .filter_map(|f| f.metadata().ok())
+                .map(|m| m.len())
+                .sum();
+            Some((used, bytes, e.path()))
+        })
+        .collect();
+    dirs.sort(); // oldest first
+    let mut total: u64 = dirs.iter().map(|d| d.1).sum();
+    for (used, bytes, path) in dirs {
+        if now.duration_since(used).unwrap_or_default() < max_age && total <= max_bytes {
+            continue;
+        }
+        if std::fs::remove_dir_all(&path).is_ok() {
+            total -= bytes;
+        }
+    }
+}
+
+/// The archive's contents as a summary line and a path per line (folders end in /).
+fn archive_text(entries: &[crate::fileops::Entry]) -> (String, String) {
+    const SHOW: usize = 1000;
+    let (dirs, files): (Vec<_>, Vec<_>) = entries.iter().partition(|e| e.dir);
+    let bytes: u64 = files.iter().map(|e| e.size).sum();
+    let s = |n: usize, w: &str| if n == 1 { format!("1 {w}") } else { format!("{n} {w}s") };
+    let summary = format!(
+        "{}, {} · {} unpacked",
+        s(files.len(), "file"),
+        s(dirs.len(), "folder"),
+        glib::format_size(bytes)
+    );
+    let mut list: Vec<String> = entries
+        .iter()
+        .take(SHOW)
+        .map(|e| if e.dir { format!("{}/", e.path) } else { e.path.clone() })
+        .collect();
+    if entries.len() > SHOW {
+        list.push(format!("…and {} more", entries.len() - SHOW));
+    }
+    (summary, list.join("\n"))
+}
+
 fn open_doc(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Option<Doc> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (path, stamp).hash(&mut h);
-    let dir = glib::user_cache_dir().join("kestrel/preview").join(format!("{:016x}", h.finish()));
+    let dir = cache_root().join(format!("{:016x}", h.finish()));
     std::fs::create_dir_all(&dir).ok()?;
+    // mtime = last viewed, which is what prune() goes by
+    let _ = std::fs::File::open(&dir).and_then(|f| f.set_modified(std::time::SystemTime::now()));
     let pdf = if office {
         let pdf = dir.join("doc.pdf");
         if !pdf.exists() {
@@ -121,9 +183,20 @@ fn render_page(doc: &Doc, n: u32) -> Option<std::path::PathBuf> {
         // render under a temporary name: a half-written PNG must never be shown
         let tmp = doc.dir.join(format!("tmp{n}-{:?}", std::thread::current().id()).replace(['(', ')'], ""));
         let mut c = crate::fileops::sandboxed("pdftoppm", &doc.pdf, &doc.dir);
-        c.args(["-singlefile", "-scale-to-x", "1000", "-scale-to-y", "-1", "-png", "-f", &n.to_string(), "-l", &n.to_string()])
-            .arg(&doc.pdf)
-            .arg(&tmp);
+        c.args([
+            "-singlefile",
+            "-scale-to-x",
+            "1000",
+            "-scale-to-y",
+            "-1",
+            "-png",
+            "-f",
+            &n.to_string(),
+            "-l",
+            &n.to_string(),
+        ])
+        .arg(&doc.pdf)
+        .arg(&tmp);
         let ok = c.output().is_ok_and(|o| o.status.success());
         let made = tmp.with_extension("png");
         if !ok || std::fs::rename(&made, &png).is_err() {
@@ -299,6 +372,7 @@ impl Preview {
         root.append(&header);
         root.append(&scroller);
         crate::label_icon_buttons(root.upcast_ref());
+        std::thread::spawn(|| prune(&cache_root(), CACHE_MAX_AGE, CACHE_MAX_BYTES));
         Preview {
             root,
             body,
@@ -368,13 +442,27 @@ impl Preview {
             let note = gtk::Label::builder().label("Rendering preview…").wrap(true).css_classes(["dim-label"]).build();
             waiting.append(&img);
             waiting.append(&note);
-            let pic = gtk::Picture::builder().can_shrink(true).content_fit(gtk::ContentFit::Contain).css_classes(["card"]).build();
+            let pic = gtk::Picture::builder()
+                .can_shrink(true)
+                .content_fit(gtk::ContentFit::Contain)
+                .css_classes(["card"])
+                .build();
             let btn = |icon: &str, tip: &str| {
-                gtk::Button::builder().icon_name(icon).tooltip_text(tip).css_classes(["flat", "circular"]).sensitive(false).build()
+                gtk::Button::builder()
+                    .icon_name(icon)
+                    .tooltip_text(tip)
+                    .css_classes(["flat", "circular"])
+                    .sensitive(false)
+                    .build()
             };
             let (prev, next) = (btn("go-previous-symbolic", "Previous page"), btn("go-next-symbolic", "Next page"));
             let label = gtk::Label::builder().css_classes(["dim-label", "numeric"]).build();
-            let nav = gtk::CenterBox::builder().start_widget(&prev).center_widget(&label).end_widget(&next).visible(false).build();
+            let nav = gtk::CenterBox::builder()
+                .start_widget(&prev)
+                .center_widget(&label)
+                .end_widget(&next)
+                .visible(false)
+                .build();
             // arrows above the page: pages differ in height, and the buttons must not move under
             // the pointer while clicking through
             visual.append(&nav);
@@ -418,9 +506,7 @@ impl Preview {
                     p.go(p.cur.get() + 1);
                 });
                 // wheel/touchpad over the page flips pages; past either end the pane scrolls
-                let scroll = gtk::EventControllerScroll::new(
-                    gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE,
-                );
+                let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE);
                 let p = pager.clone();
                 scroll.connect_scroll(move |_, _, dy| {
                     let n = p.cur.get();
@@ -555,27 +641,76 @@ impl Preview {
         } else if gio::content_type_is_a(&ct, "text/plain")
             && let Some(p) = file.path()
         {
-            let text = read_head(&p);
-            let tv = gtk::TextView::builder()
-                .editable(false)
-                .monospace(true)
-                .wrap_mode(gtk::WrapMode::None)
-                .top_margin(8)
-                .left_margin(8)
-                .bottom_margin(8)
-                .right_margin(8)
+            self.body.append(&text_card(&read_head(&p)));
+        } else if crate::fileops::archive_ext(&info.name().to_string_lossy()).is_some()
+            && let Some(p) = file.path().and_then(|p| p.canonicalize().ok())
+        {
+            let lbl = gtk::Label::builder()
+                .label("Reading archive…")
+                .xalign(0.0)
+                .wrap(true)
+                .css_classes(["dim-label"])
                 .build();
-            tv.buffer().set_text(&text);
-            tv.add_css_class("card");
-            self.body
-                .append(&gtk::ScrolledWindow::builder().child(&tv).height_request(360).vexpand(true).build());
+            self.body.append(&lbl);
+            let (body, serial, me_serial) = (self.body.clone(), self.serial.get(), self.serial.clone());
+            glib::spawn_future_local(async move {
+                let r = gio::spawn_blocking(move || {
+                    let scratch = cache_root().join("list");
+                    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+                    crate::fileops::list_archive(&p, &scratch).map(|e| archive_text(&e))
+                })
+                .await
+                .unwrap_or_else(|_| Err("Couldn't read this archive".into()));
+                if me_serial.get() != serial {
+                    return;
+                }
+                match r {
+                    Ok((summary, list)) => {
+                        lbl.set_label(&summary);
+                        body.append(&text_card(&list));
+                    }
+                    Err(e) => lbl.set_label(&e),
+                }
+            });
         }
     }
+}
+
+/// Monospace, read-only, scrollable text in a card.
+fn text_card(text: &str) -> gtk::ScrolledWindow {
+    let tv = gtk::TextView::builder()
+        .editable(false)
+        .monospace(true)
+        .wrap_mode(gtk::WrapMode::None)
+        .top_margin(8)
+        .left_margin(8)
+        .bottom_margin(8)
+        .right_margin(8)
+        .build();
+    tv.buffer().set_text(text);
+    tv.add_css_class("card");
+    gtk::ScrolledWindow::builder().child(&tv).height_request(360).vexpand(true).build()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prune_drops_stale_then_oldest() {
+        let root = std::env::temp_dir().join(format!("kestrel-prune-{}", std::process::id()));
+        let day = std::time::Duration::from_secs(86400);
+        let now = std::time::SystemTime::now();
+        for (name, age, bytes) in [("old", 40, 1), ("mid", 5, 600), ("new", 1, 600)] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+            std::fs::write(root.join(name).join("p1.png"), vec![0u8; bytes]).unwrap();
+            std::fs::File::open(root.join(name)).unwrap().set_modified(now - day * age).unwrap();
+        }
+        prune(&root, day * 30, 1000);
+        let left: Vec<_> = ["old", "mid", "new"].into_iter().filter(|n| root.join(n).exists()).collect();
+        assert_eq!(left, ["new"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn markdown_is_valid_pango() {

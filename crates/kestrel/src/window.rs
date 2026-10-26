@@ -332,7 +332,11 @@ impl Win {
         // sidebar is hidden (so the button never moves out from under the pointer's corner)
         let side_toggle = side_btn();
         let content_toggle = side_btn();
-        split.bind_property("show-sidebar", &content_toggle, "visible").invert_boolean().sync_create().build();
+        split
+            .bind_property("show-sidebar", &content_toggle, "visible")
+            .invert_boolean()
+            .sync_create()
+            .build();
         hrow.append(&content_toggle);
         hrow.append(&back_btn);
         hrow.append(&fwd_btn);
@@ -394,9 +398,9 @@ impl Win {
         main.add_top_bar(&banner);
         main.add_top_bar(&bar.chips);
         // file-operation progress: a thin bar under the header, never squeezing the header itself
-        ops.progress.set_valign(gtk::Align::Start);
-        ops.progress.set_hexpand(true);
-        main.add_top_bar(&ops.progress);
+        ops.bar.set_valign(gtk::Align::Start);
+        ops.bar.set_hexpand(true);
+        main.add_top_bar(&ops.bar);
         main.set_content(Some(&content));
 
         let side = adw::ToolbarView::new();

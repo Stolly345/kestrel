@@ -1,11 +1,11 @@
 //! A `gio::ListModel` over kestrel-indexd results, fetched lazily a page at a time so a
 //! million-hit query scrolls like a ten-hit one.
 
-use kestrel_index::Sort;
-use kestrel_index::proto::{Hit, Request, Response, socket_path};
 use gtk::gio::subclass::prelude::*;
 use gtk::prelude::*;
 use gtk::{gio, glib};
+use kestrel_index::Sort;
+use kestrel_index::proto::{Hit, Request, Response, socket_path};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};

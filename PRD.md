@@ -368,3 +368,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   before /usr/share) at launch and on every gtk-icon-theme-name change; a grey/unknown folder removes it (packaged
   yellow shows). Beak and eye ring stay yellow (not connected to the folder). Preferences → Browsing → Preview pane
   at start: Remember Last State (default; session.json `preview`) / Always Show / Always Hide.
+- **v0.9.10 (2026-10-26): cancel extract, extract conflicts, archive listing, preview cache pruning.** A Cancel
+  button sits beside the progress bar while an archive extracts (7-Zip or tar); it SIGKILLs the outer bwrap, which
+  takes the sandbox down (--die-with-parent), and the staging folder is removed. When the extracted item's name
+  already exists, the copy/move conflict dialog asks Skip / Keep Both / Replace (Replace trashes the old one; Undo
+  restores it); Cancel there = Skip. The preview pane lists an archive's contents (sandboxed `7zz l -slt`, or `tar -tv`
+  for tarballs): "N files, M folders · size unpacked" and up to 1000 paths; encrypted headers say so.
+  ~/.cache/kestrel/preview is pruned at launch: entries not viewed for 30 days go, then least recently viewed until
+  under 512 MB (each open touches its folder's mtime). Unit-tested (cancel, both listings, prune); not click-tested —
+  Broadway can't run inside the Claude sandbox this session.
