@@ -31,6 +31,10 @@ files in 5 seconds, ~230 MB of memory) and keeps it **live through fanotify**, w
 file manager whose search box asks it. A whole-disk search answers in tens of milliseconds, and
 the results only ever include files you could find yourself.
 
+**Why the bird?** A kestrel hovers in one spot above a whole field and still sees a single mouse
+move in the grass. That's the job here: keep watch over the entire disk, notice every change as
+it happens, and pick out the one file you want the moment you ask for it.
+
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/search.png" alt="Typing .iso lists ISO images first"></td>
