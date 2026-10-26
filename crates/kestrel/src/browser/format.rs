@@ -62,6 +62,18 @@ pub(crate) fn content_type(info: &gio::FileInfo) -> Option<glib::GString> {
     info.has_attribute("standard::content-type").then(|| info.content_type()).flatten()
 }
 
+/// "/home/maya/Documents" -> "~/Documents": shorter in the Folder column and the preview pane.
+/// (Properties keeps the full path, for copying.)
+pub fn tilde(path: &str) -> String {
+    let home = glib::home_dir();
+    let home = home.to_string_lossy();
+    match path.strip_prefix(home.as_ref()) {
+        Some("") => "~".into(),
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => path.to_string(),
+    }
+}
+
 pub(crate) fn is_dirlike(info: &gio::FileInfo) -> bool {
     matches!(info.file_type(), gio::FileType::Directory | gio::FileType::Mountable | gio::FileType::Shortcut)
 }
@@ -197,6 +209,15 @@ pub fn as_location(t: &str) -> Option<gio::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_becomes_tilde() {
+        let h = glib::home_dir().to_string_lossy().into_owned();
+        assert_eq!(tilde(&format!("{h}/Documents")), "~/Documents");
+        assert_eq!(tilde(&h), "~");
+        assert_eq!(tilde(&format!("{h}2/x")), format!("{h}2/x")); // not a prefix match on names
+        assert_eq!(tilde("/etc"), "/etc");
+    }
 
     #[test]
     fn errors_read_as_sentences() {

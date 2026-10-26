@@ -781,13 +781,106 @@ impl Pager {
 }
 
 /// Markdown as Pango markup: headings, emphasis, code, links, lists, quotes, tables as rows.
+/// Where a local picture goes in the rendered text: "\u{1}path\u{1}", split out by md_page. Web images
+/// (badges and the like) are left out: a preview shouldn't go online because a file was selected.
+fn image_marker(url: &str) -> String {
+    if url.contains("://") || url.starts_with("data:") || url.is_empty() {
+        String::new()
+    } else {
+        format!("\u{1}{url}\u{1}")
+    }
+}
+
+/// The src of every <img> in a piece of HTML.
+fn img_srcs(html: &str) -> Vec<String> {
+    html.split("<img")
+        .skip(1)
+        .filter_map(|tag| {
+            let tag = tag.split('>').next()?;
+            let rest = tag.split("src=").nth(1)?;
+            let q = rest.chars().next()?;
+            let v = if q == '"' || q == '\'' {
+                rest[1..].split(q).next()?
+            } else {
+                rest.split_whitespace().next()?
+            };
+            Some(v.to_string())
+        })
+        .collect()
+}
+
+/// Rendered Markdown as a column of text and the local pictures it shows (paths relative to `dir`).
+fn md_page(markup: &str, dir: &std::path::Path) -> gtk::Box {
+    let col = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .margin_start(18)
+        .margin_end(18)
+        .margin_top(16)
+        .margin_bottom(16)
+        .build();
+    for (i, part) in markup.split('\u{1}').enumerate() {
+        if i % 2 == 1 {
+            let path = dir.join(glib::Uri::unescape_string(part, None::<&str>).map_or(part.to_string(), |s| s.to_string()));
+            let pic = gtk::Picture::builder()
+                .can_shrink(true)
+                .content_fit(gtk::ContentFit::ScaleDown)
+                .halign(gtk::Align::Center)
+                .build();
+            col.append(&pic);
+            let pic2 = pic.clone();
+            glib::spawn_future_local(async move {
+                let f = gio::File::for_path(&path);
+                match gio::spawn_blocking(move || load_image(&f)).await {
+                    Ok(Some(t)) => {
+                        // a scrolled column gives a picture no height of its own: size it from its shape,
+                        // fitted to the page (~200 px wide in the preview pane), never enlarged
+                        let (w, h) = (t.width().max(1) as f64, t.height() as f64);
+                        pic2.set_height_request((h * (200.0 / w).min(1.0)) as i32);
+                        pic2.set_paintable(Some(&t));
+                    }
+                    _ => pic2.set_visible(false),
+                }
+            });
+            continue;
+        }
+        let text = part.trim_matches('\n');
+        if text.trim().is_empty() {
+            continue;
+        }
+        let lbl = gtk::Label::builder()
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .xalign(0.0)
+            .selectable(true)
+            .build();
+        // a marker inside a link or heading splits its tags; such a piece shows as plain text
+        if gtk::pango::parse_markup(text, '\0').is_ok() {
+            lbl.set_markup(text);
+        } else {
+            lbl.set_text(&strip_tags(text));
+        }
+        col.append(&lbl);
+    }
+    col
+}
+
 fn md_markup(src: &str) -> String {
     use pulldown_cmark::{Event as E, HeadingLevel as H, Options, Parser, Tag as T, TagEnd as TE};
     let esc = |t: &str| glib::markup_escape_text(t).to_string();
     let (mut out, mut lists) = (String::new(), Vec::<Option<u64>>::new());
+    let mut in_image = false; // an image's alt text isn't shown: the picture is
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     for ev in Parser::new_ext(src, opts) {
+        if in_image {
+            in_image = !matches!(ev, E::End(TE::Image));
+            continue;
+        }
         match ev {
+            E::Start(T::Image { dest_url, .. }) => {
+                out.push_str(&image_marker(&dest_url));
+                in_image = true;
+            }
             E::Start(T::Heading { level, .. }) => out.push_str(match level {
                 H::H1 => "<span size='xx-large' weight='bold'>",
                 H::H2 => "<span size='x-large' weight='bold'>",
@@ -837,7 +930,12 @@ fn md_markup(src: &str) -> String {
             E::End(TE::TableHead) | E::End(TE::TableRow) => out.push('\n'),
             E::Text(t) => out.push_str(&esc(&t)),
             // raw HTML (a README's centring <div>, badges): the text between the tags, not the tags
-            E::Html(t) | E::InlineHtml(t) => out.push_str(&esc(&strip_tags(&t))),
+            E::Html(t) | E::InlineHtml(t) => {
+                for src in img_srcs(&t) {
+                    out.push_str(&image_marker(&src));
+                }
+                out.push_str(&esc(&strip_tags(&t)));
+            }
             E::SoftBreak => out.push(' '),
             E::HardBreak => out.push('\n'),
             E::Rule => out.push_str("────────────\n\n"),
@@ -1093,29 +1191,17 @@ impl Preview {
         } else if gio::content_type_is_a(&ct, "text/markdown")
             && let Some(p) = file.path()
         {
-            // rendered onto a page, where PDF and Office documents show theirs
-            let lbl = gtk::Label::builder()
-                .use_markup(true)
-                .wrap(true)
-                .wrap_mode(gtk::pango::WrapMode::WordChar)
-                .xalign(0.0)
-                .yalign(0.0)
-                .selectable(true)
-                .margin_start(18)
-                .margin_end(18)
-                .margin_top(16)
-                .margin_bottom(16)
-                .build();
+            // rendered onto a page, where PDF and Office documents show theirs, pictures included
             let page = gtk::ScrolledWindow::builder()
-                .child(&lbl)
                 .hscrollbar_policy(gtk::PolicyType::Never)
                 .height_request(340)
                 .css_classes(["card", "md-page"])
                 .build();
             visual.append(&page);
+            let dir = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
             glib::spawn_future_local(async move {
                 if let Ok(text) = gio::spawn_blocking(move || read_head(&p)).await {
-                    lbl.set_markup(&md_markup(&text));
+                    page.set_child(Some(&md_page(&md_markup(&text), &dir)));
                 }
             });
         } else if thumbs::can_thumbnail(info) {
@@ -1186,7 +1272,7 @@ impl Preview {
         row(&grid, 2, "Modified", &fmt_date(info));
         let loc = file
             .parent()
-            .map(|p| p.path().map_or_else(|| p.uri().to_string(), |x| x.display().to_string()))
+            .map(|p| p.path().map_or_else(|| p.uri().to_string(), |x| crate::browser::tilde(&x.to_string_lossy())))
             .unwrap_or_default();
         row(&grid, 3, "Location", &loc);
         if info.has_attribute("unix::mode") {
@@ -1507,7 +1593,14 @@ mod tests {
         // raw HTML: tags dropped, text kept
         assert!(!m.contains("&lt;x&gt;"));
         let h = md_markup("<div align=\"center\">\n<img src=\"a.svg\" alt=\"icon\">\n\nHello <b>there</b>\n</div>\n");
-        assert!(!h.contains("div") && !h.contains("img") && h.contains("there"), "{h}");
+        assert!(!h.contains("div") && !h.contains("<img") && h.contains("there"), "{h}");
+        // local pictures are marked for md_page, web ones (badges) left out
+        assert!(h.contains("\u{1}a.svg\u{1}"), "{h}");
+        let m = md_markup("![Logo](docs/logo.png) and ![badge](https://img.shields.io/x)\n");
+        assert!(
+            m.contains("\u{1}docs/logo.png\u{1}") && !m.contains("shields") && !m.contains("Logo") && !m.contains("badge"),
+            "{m}"
+        );
         assert!(is_office("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
         assert!(!is_office("application/pdf"));
     }

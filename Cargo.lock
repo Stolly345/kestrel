@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel"
-version = "0.9.21"
+version = "0.9.22"
 dependencies = [
  "git2",
  "gstreamer",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-index"
-version = "0.9.21"
+version = "0.9.22"
 dependencies = [
  "chrono",
  "libc",
@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-indexd"
-version = "0.9.21"
+version = "0.9.22"
 dependencies = [
  "kestrel-index",
  "libc",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "ks"
-version = "0.9.21"
+version = "0.9.22"
 dependencies = [
  "chrono",
  "kestrel-index",

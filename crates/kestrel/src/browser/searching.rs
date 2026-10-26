@@ -98,6 +98,7 @@ impl Browser {
                     } else {
                         b.show_view();
                     }
+                    b.apply_pending_select();
                 }
                 // keep the last good results on screen; the status bar shows what's wrong
                 Err(SearchError::Query(e)) => *b.search_state.borrow_mut() = SearchState::BadQuery(e),

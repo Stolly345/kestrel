@@ -253,6 +253,7 @@ pub fn load_into(img: &gtk::Image, info: &gio::FileInfo) {
             && wanted()
         {
             img.set_from_file(Some(&p));
+            img.add_css_class("thumb"); // an outline, so a white page still reads at 16 px
         }
     });
 }

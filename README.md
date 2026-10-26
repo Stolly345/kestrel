@@ -230,6 +230,8 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and
   Show in Folder. Failures leave a screenshot and a dump of what was on screen in
   `target/feature-test/`. Needs `xvfb` and `python3-xlib`.
+- **`scripts/screenshots.sh`** regenerates the screenshots above from the real app and a made-up
+  home folder.
 - **`scripts/smoke-live.sh`** (run as yourself; it uses sudo only for a test service) checks live
   updates, permission filtering, excluded folders, and drives mounting and unmounting. Run it
   after any change to `kestrel-indexd` or `kestrel-index`.

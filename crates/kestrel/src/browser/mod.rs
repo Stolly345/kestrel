@@ -335,7 +335,7 @@ impl Browser {
         );
         let dir_col = col(
             "Folder",
-            label_factory(&me, 0.0, |i| i.attribute_string("kestrel::dir").map(|s| s.to_string()).unwrap_or_default()),
+            label_factory(&me, 0.0, |i| i.attribute_string("kestrel::dir").map(|s| tilde(&s)).unwrap_or_default()),
             gtk::CustomSorter::new(|a, b| cmp(info_of(a).attribute_string("kestrel::dir"), info_of(b).attribute_string("kestrel::dir"))),
             0,
         );
@@ -1177,15 +1177,16 @@ impl Browser {
     /// Select these names once the folder has loaded (FileManager1.ShowItems), then call `then`.
     pub fn select_when_loaded(&self, names: Vec<String>, then: impl FnOnce() + 'static) {
         *self.pending_select.borrow_mut() = Some((names, Box::new(then)));
-        if !self.dirlist.is_loading() && self.dirlist.file().is_some() {
+        // a search tab selects once its results arrive (run_search calls apply_pending_select)
+        if !self.is_searching() && !self.dirlist.is_loading() && self.dirlist.file().is_some() {
             self.apply_pending_select();
         }
     }
 
-    fn apply_pending_select(&self) {
+    pub(super) fn apply_pending_select(&self) {
         let Some((names, then)) = self.pending_select.take() else { return };
         self.select_names(&names);
-        let first = self.dir_sel.selection().minimum();
+        let first = self.sel().selection().minimum();
         if first != u32::MAX {
             self.list.scroll_to(first, None, gtk::ListScrollFlags::FOCUS, None);
         }
@@ -1194,7 +1195,7 @@ impl Browser {
 
     /// Folder view, or an empty/error page once loading has finished.
     fn show_folder_state(&self) {
-        if !self.dirlist.is_loading() {
+        if !self.dirlist.is_loading() && !self.is_searching() {
             self.apply_pending_select();
         }
         if let Some(e) = self.dirlist.error() {

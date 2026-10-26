@@ -421,6 +421,15 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.22 (2026-10-26): README screenshots.** scripts/screenshots.sh makes docs/screenshots/{kestrel,search,
+  preview}.png from the real app on a made-up home ("maya": PDFs made by LibreOffice, sparse ISOs, a git
+  project) with its own index and a thumbnail warm-up pass. App changes it needed: folders under home show as
+  `~/…` in the Folder column and the preview's Location (`browser::tilde`; Properties keeps the full path);
+  `--select` / Show in Folder in a search tab waits for the results; thumbnails get a faint outline so a white
+  PDF page still reads at 16 px. (A /home/maya bubblewrap overlay was tried first: Kestrel's own PDF sandbox
+  can't nest inside it.)
+  Markdown preview shows the pictures a file uses when they're local files beside it (`md_page`: markdown
+  images and HTML <img>, sized from their shape); web images such as badges are left out on purpose.
 - **v0.9.21 (2026-10-26): folder sizes on network shares.** A share's sidebar bar is its disk's totals
   (both NAS shares report the same 3.9 TB volume; that's what a share can report, and it answers "will
   this fit", so it stays). For a folder's own size, Properties now shows Calculate on folders the index

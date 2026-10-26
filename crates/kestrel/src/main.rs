@@ -29,6 +29,7 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 const CSS: &str = "
+image.thumb { outline: 1px solid alpha(currentColor, 0.25); outline-offset: -1px; border-radius: 2px; }
 .md-page, .md-page > viewport { background: #ffffff; color: #1e1e1e; }
 levelbar.usage block.used { background: @accent_bg_color; }
 levelbar.usage block.nearly-full { background: @error_bg_color; }
