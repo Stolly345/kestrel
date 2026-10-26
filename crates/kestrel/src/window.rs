@@ -34,6 +34,9 @@ pub struct Session {
     pub hidden: bool,
     pub mode: String,
     pub size: (i32, i32),
+    /// Preview pane open at quit (older session files lack it)
+    #[serde(default)]
+    pub preview: bool,
 }
 
 fn session_file() -> std::path::PathBuf {
@@ -819,6 +822,7 @@ impl Win {
             hidden: self.show_hidden.get(),
             mode: self.current().map_or("list", |b| b.mode().name()).into(),
             size: self.window.default_size(),
+            preview: self.preview.root.is_visible(),
         };
         let p = session_file();
         let _ = std::fs::create_dir_all(p.parent().unwrap());

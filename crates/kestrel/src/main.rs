@@ -4,6 +4,7 @@ mod browser;
 mod filemanager1;
 mod fileops;
 mod git;
+mod icon;
 mod palette;
 mod prefs;
 mod preview;
@@ -171,6 +172,7 @@ fn main() -> glib::ExitCode {
     };
     app.connect_startup(move |app| {
         gtk::Window::set_default_icon_name("dev.kestrel.Kestrel");
+        icon::follow_theme();
         prefs::apply_color_scheme(&prefs::get());
         let css = gtk::CssProvider::new();
         css.load_from_string(CSS);
@@ -201,6 +203,14 @@ fn main() -> glib::ExitCode {
         };
         if args.dual {
             w.set_dual(true);
+        }
+        let preview = match prefs::get().preview_at_start.as_str() {
+            "show" => true,
+            "hide" => false,
+            _ => window::load_session().is_some_and(|s| s.preview),
+        };
+        if preview {
+            gio::prelude::ActionGroupExt::activate_action(&w.window, "preview", None);
         }
         if args.hidden || prefs::get().show_hidden {
             w.set_hidden(true);

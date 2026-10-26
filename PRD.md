@@ -361,3 +361,10 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   decompressors tar calls), gvfs (trash://, recent://, network://), xdg-utils (default-file-manager hookup) and pkexec
   ("Start Service"); Recommends adds ncompress (.tar.z/.taz). `sudo apt install ./kestrel_*.deb` lists whatever a
   machine is missing and asks once (Y/n); `--no-install-recommends` skips the previews/terminal/ncompress extras.
+- **v0.9.9 (2026-10-26): icon follows the icon theme; preview pane at start.** The icon's folder takes the colour of
+  the active icon theme's own folder icon (its most common saturated colour: Yaru accents, Papirus, Adwaita…).
+  packaging/icon/split.py splits the art into a tintable folder layer (grey shading, 128 = front face) and the bird;
+  icon.rs tints, composites, and writes ~/.local/share/icons/hicolor/scalable/apps/dev.kestrel.Kestrel.svg (searched
+  before /usr/share) at launch and on every gtk-icon-theme-name change; a grey/unknown folder removes it (packaged
+  yellow shows). Beak and eye ring stay yellow (not connected to the folder). Preferences → Browsing → Preview pane
+  at start: Remember Last State (default; session.json `preview`) / Always Show / Always Hide.

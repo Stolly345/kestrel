@@ -40,6 +40,8 @@ pub struct Settings {
     pub type_style: String,
     /// Details-view columns after Name, in display order.
     pub columns: Vec<ColumnPref>,
+    /// Preview pane when Kestrel starts: "remember" (as it was at quit) | "show" | "hide"
+    pub preview_at_start: String,
 }
 
 impl Default for Settings {
@@ -54,6 +56,7 @@ impl Default for Settings {
             clock: "system".into(),
             type_style: "full".into(),
             columns: default_columns(),
+            preview_at_start: "remember".into(),
         }
     }
 }
@@ -343,6 +346,15 @@ pub fn show(
     let restore = switch("Reopen tabs at start", "Pick up where you left off", s.restore_session);
     restore.connect_active_notify(|r| update(|s| s.restore_session = r.is_active()));
     browse.add(&restore);
+    let starts = ["remember", "show", "hide"];
+    let preview = combo(
+        "Preview pane at start",
+        "Whether the preview pane is open when Kestrel starts",
+        &["Remember Last State", "Always Show", "Always Hide"],
+        starts.iter().position(|x| *x == s.preview_at_start).unwrap_or(0) as u32,
+    );
+    preview.connect_selected_notify(move |r| update(|s| s.preview_at_start = starts[r.selected().min(2) as usize].into()));
+    browse.add(&preview);
     let styles = ["full", "short", "extension"];
     let types = combo(
         "File type names",
