@@ -16,6 +16,7 @@ libc = "0.2"
 regex = "1"
 vte4 = "0.10"
 pulldown-cmark = { version = "0.13.5", default-features = false }
+lofty = "0.25.5"
 
 [package.metadata.deb]
 name = "kestrel"
@@ -32,7 +33,7 @@ priority = "optional"
 depends = "$auto, bubblewrap, tar, gzip, xz-utils, bzip2, zstd, gvfs, xdg-utils, pkexec"
 conflicts = "chimera"
 replaces = "chimera"
-recommends = "ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
+recommends = "gstreamer1.0-libav, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
 conf-files = ["/etc/kestrel/excludes"]
 maintainer-scripts = "../../packaging/debian/"
 assets = [
@@ -42,6 +43,7 @@ assets = [
     ["../../packaging/excludes", "etc/kestrel/excludes", "644"],
     ["../../packaging/dev.kestrel.Kestrel.desktop", "usr/share/applications/", "644"],
     ["../../packaging/dev.kestrel.Kestrel.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../packaging/kestrel-mime.xml", "usr/share/mime/packages/kestrel.xml", "644"],
     ["../../PLAN.md", "usr/share/doc/kestrel/PLAN.md", "644"],
     ["../../packaging/7zip/7zz", "usr/lib/kestrel/7zz", "755"],
     ["../../packaging/7zip/License.txt", "usr/share/doc/kestrel/7zip-License.txt", "644"],

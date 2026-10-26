@@ -802,6 +802,19 @@ impl Win {
             sc.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string(key), Some(gtk::NamedAction::new(action))));
         }
         self.window.add_controller(sc);
+        // the mouse's back/forward thumb buttons (8 and 9 on X11 and Wayland)
+        let mouse = gtk::GestureClick::builder().button(0).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let win = self.window.clone();
+        mouse.connect_pressed(move |g, _, _, _| {
+            let action = match g.current_button() {
+                8 => "win.back",
+                9 => "win.forward",
+                _ => return,
+            };
+            g.set_state(gtk::EventSequenceState::Claimed);
+            let _ = WidgetExt::activate_action(&win, action, None);
+        });
+        self.window.add_controller(mouse);
 
         // start typing anywhere (outside a text field) to search; also bubble phase, for the same reason
         let k = gtk::EventControllerKey::new();
@@ -948,5 +961,6 @@ regex:^x   file:  folder:   ext:pdf;docx
 size:>1gb  size:1mb..10mb  size:empty|tiny|small|medium|large|huge|gigantic
 dm:today|yesterday|thisweek|thismonth|thisyear|last7days|2026-10|>2026-10-01
 audio:  video:  pic:  doc:  zip:  exe:
+diagram:  cad:  gis:  data:  cert:  lib:  code:  font:
 
 Ctrl+F searches inside the current folder.";

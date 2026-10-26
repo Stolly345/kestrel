@@ -71,9 +71,12 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".zst",
     ".lzma",
     ".z",
-    // books and comics (zip inside)
+    // books and comics (zip, or RAR/7z/tar for .cbr/.cb7/.cbt)
     ".epub",
     ".cbz",
+    ".cbr",
+    ".cb7",
+    ".cbt",
     // packages and installers
     ".deb",
     ".udeb",
@@ -88,7 +91,15 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".crx",
     ".ipa",
     ".appx",
+    ".msix",
     ".pkg",
+    ".ear",
+    ".nupkg",
+    ".gem",
+    ".ipk",
+    ".snap",
+    ".appimage",
+    ".a",
     // disk and file-system images
     ".iso",
     ".img",
@@ -130,6 +141,9 @@ pub fn archive_source(f: &gio::File) -> Option<gio::File> {
 /// libarchive formats. These still extract and preview; they just can't be browsed as folders.
 const NO_GVFS: &[&str] = &[
     ".7z",
+    ".cb7",
+    ".snap",
+    ".appimage",
     ".arj",
     ".chm",
     ".cramfs",
@@ -165,7 +179,35 @@ pub fn browsable(name: &str) -> bool {
 
 pub fn browse_on_open(name: &str) -> bool {
     const IN_APP: &[&str] = &[
-        ".deb", ".udeb", ".rpm", ".msi", ".msp", ".apk", ".jar", ".war", ".whl", ".xpi", ".crx", ".ipa", ".appx", ".pkg", ".epub", ".cbz", ".chm", ".ova",
+        ".deb",
+        ".udeb",
+        ".rpm",
+        ".msi",
+        ".msp",
+        ".apk",
+        ".jar",
+        ".war",
+        ".whl",
+        ".xpi",
+        ".crx",
+        ".ipa",
+        ".appx",
+        ".msix",
+        ".pkg",
+        ".ear",
+        ".nupkg",
+        ".gem",
+        ".ipk",
+        ".snap",
+        ".appimage",
+        ".a",
+        ".epub",
+        ".cbz",
+        ".cbr",
+        ".cb7",
+        ".cbt",
+        ".chm",
+        ".ova",
     ];
     browsable(name)
         && archive_ext(name).is_some_and(|e| {
@@ -497,7 +539,21 @@ mod tests {
         for n in ["a.zip", "b.tar.bz2", "c.tar.gz", "d.part1.rar", "e.cab"] {
             assert!(browse_on_open(n), "{n}");
         }
-        for n in ["a.deb", "b.iso", "c.epub", "d.qcow2", "e.docx", "f.whl", "g.7z", "h.gz"] {
+        for n in [
+            "a.deb",
+            "b.iso",
+            "c.epub",
+            "d.qcow2",
+            "e.docx",
+            "f.whl",
+            "g.7z",
+            "h.gz",
+            "i.cbr",
+            "j.cbt",
+            "k.AppImage",
+            "l.snap",
+            "m.a",
+        ] {
             assert!(!browse_on_open(n), "{n}");
         }
     }
@@ -528,7 +584,7 @@ mod tests {
         };
         // packages keep their own layout (7-Zip gives a .deb's data.tar, an .rpm's .cpio);
         // LZH/CHM/old-style RAR are downloaded real-world files
-        const NO_HELLO: &[&str] = &[".deb", ".udeb", ".rpm", ".lzh", ".lha", ".chm", ".r00"];
+        const NO_HELLO: &[&str] = &[".deb", ".udeb", ".ipk", ".rpm", ".lzh", ".lha", ".chm", ".r00"];
         let work = std::env::temp_dir().join(format!("kestrel-formats-{}", std::process::id()));
         let (mut missing, mut failed) = (Vec::new(), Vec::new());
         // one line per format; shown with `cargo test every_format -- --nocapture`

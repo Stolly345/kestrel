@@ -46,6 +46,14 @@ pub fn options(g: Group) -> &'static [(&'static str, &'static str)] {
             ("video:", "Video"),
             ("zip:", "Archives"),
             ("exe:", "Programs"),
+            ("diagram:", "Diagrams"),
+            ("cad:", "CAD and 3D"),
+            ("gis:", "Maps and GPS"),
+            ("data:", "Data and config"),
+            ("cert:", "Keys and certificates"),
+            ("lib:", "Libraries and bytecode"),
+            ("code:", "Source code"),
+            ("font:", "Fonts"),
         ],
         Group::Date => &[
             ("", "Any time"),
@@ -187,6 +195,14 @@ const MODIFIERS: &[(&str, &str)] = &[
     ("video:", "video"),
     ("zip:", "archives"),
     ("exe:", "programs and installers"),
+    ("diagram:", "whiteboards, diagrams, mind maps"),
+    ("cad:", "CAD, 3D models, 3D printing"),
+    ("gis:", "maps, GPS tracks, charts"),
+    ("data:", "config, data files, databases"),
+    ("cert:", "keys, certificates, vaults"),
+    ("lib:", "libraries, object files, bytecode"),
+    ("code:", "source code, scripts, web files"),
+    ("font:", "fonts"),
 ];
 
 const VALUES: &[(&str, &[&str])] = &[

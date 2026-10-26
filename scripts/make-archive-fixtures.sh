@@ -119,9 +119,16 @@ WIXL
 # no Linux tool writes a patch; an .msp is the same OLE compound-file container as an .msi
 step .msp msibuild -- 'cp $(o sample.msi) $(o sample.msp)'
 zipped() { (cd "$p" && zip -qr "$(o "$1")" .); }
-for e in .apk .jar .war .whl .xpi .ipa .appx .epub .cbz; do step $e zip -- "zipped sample$e"; done
+for e in .apk .jar .war .ear .whl .xpi .ipa .appx .msix .nupkg .epub .cbz; do step $e zip -- "zipped sample$e"; done
 step .crx python3 -- 'python3 -I $here/fixtures/crx.py $(o sample.zip) $(o sample.crx)'
 step .pkg xar -- 'cp $(o sample.xar) $(o sample.pkg)'
+# a .gem is a plain tar; an .ipk (opkg) a tar.gz of control/data tarballs; a .snap a squashfs;
+# an AppImage an ELF runtime with a squashfs appended; a static library an ar archive
+step .gem cp -- 'cp $(o sample.tar) $(o sample.gem)'
+step .ipk cp -- 'cp $(o sample.tar.gz) $(o sample.ipk)'
+step .a ar -- '(cd $p && ar rc $(o sample.a) hello.txt)'
+# comic books: a .cbr/.cb7/.cbt is just a RAR/7z/tar renamed
+for f in rar:.cbr 7z:.cb7 tar:.cbt; do step ${f#*:} cp -- "cp \$(o sample.${f%%:*}) \$(o sample${f#*:})"; done
 
 # disk and file-system images
 step .img mke2fs -- 'mke2fs -q -t ext2 -b 1024 -d $p $(o sample.img) 256'
@@ -132,6 +139,8 @@ for f in vpc:.vhd vhdx:.vhdx vmdk:.vmdk vdi:.vdi qcow:.qcow qcow2:.qcow2; do
     step ${f#*:} qemu-img -- "qemu-img convert -f raw -O ${f%%:*} $opts $(o sample.img) $(o sample${f#*:})"
 done
 step .squashfs mksquashfs -- 'mksquashfs $p $(o sample.squashfs) -noappend -quiet -all-root >/dev/null'
+step .snap mksquashfs -- 'cp $(o sample.squashfs) $(o sample.snap)'
+step .appimage mksquashfs -- 'cat /usr/bin/true $(o sample.squashfs) > $(o sample.appimage)'
 step .cramfs mkfs.cramfs -- 'mkfs.cramfs $p $(o sample.cramfs) >/dev/null'
 # 7-Zip reads HFS+ (not classic HFS): cut it out of a hybrid ISO, once as HFS+ and once as HFSX
 step .hfs xorriso -- 'xorriso -as mkisofs -quiet -hfsplus -o hyb.iso $p && python3 -I $here/fixtures/hfsplus.py hyb.iso $(o sample.hfs)'

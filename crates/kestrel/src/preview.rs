@@ -48,6 +48,236 @@ pub fn perms(mode: u32) -> String {
 const TEXT_LIMIT: usize = 256 * 1024;
 
 /// Word, Excel, PowerPoint, OpenDocument and RTF: LibreOffice turns them into a PDF first.
+/// "<p align=center>Hi <b>there</b></p>" -> "Hi there"
+fn strip_tags(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    if out.trim().is_empty() { String::new() } else { out }
+}
+
+/// A Kiwix archive: its icon, title, description and what's in it.
+fn zim_card(path: std::path::PathBuf, info: &gio::FileInfo) -> gtk::Box {
+    let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(6).build();
+    let icon = gtk::Image::builder().pixel_size(96).build();
+    set_icon(&icon, info);
+    icon.set_pixel_size(96);
+    let title = gtk::Label::builder()
+        .label(info.display_name().as_str())
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .css_classes(["title-3"])
+        .build();
+    let desc = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build();
+    let meta = gtk::Label::builder()
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .css_classes(["dim-label", "caption"])
+        .label("Reading…")
+        .build();
+    for w in [icon.upcast_ref::<gtk::Widget>(), title.upcast_ref(), desc.upcast_ref(), meta.upcast_ref()] {
+        card.append(w);
+    }
+    glib::spawn_future_local(async move {
+        let r = gio::spawn_blocking(move || crate::zim::info(&path)).await;
+        let z = match r {
+            Ok(Ok(z)) => z,
+            Ok(Err(e)) => return meta.set_label(&format!("Can't read this archive: {}", crate::browser::human_io(&e))),
+            Err(_) => return,
+        };
+        if let Some(t) = z.title {
+            title.set_label(&t);
+        }
+        if let Some(d) = z.description {
+            desc.set_label(&d);
+            desc.set_visible(true);
+        }
+        if let Some(t) = z.icon.and_then(|png| gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(png)).ok()) {
+            icon.set_paintable(Some(&t));
+        }
+        let mut bits = vec![match z.articles {
+            Some(n) => format!("{} articles", thousands(n)),
+            None => format!("{} entries", thousands(z.entries as u64)),
+        }];
+        bits.extend(z.language);
+        bits.extend(z.date);
+        bits.extend(z.creator.or(z.publisher));
+        meta.set_label(&format!("Kiwix offline archive\n{}", bits.join(" \u{b7} ")));
+    });
+    card
+}
+
+/// 6863660 -> "6,863,660"
+fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// What a music file's tags say, read off the GTK thread.
+#[derive(Default)]
+struct Song {
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    year: Option<u16>,
+    secs: u64,
+    kbps: Option<u32>,
+    cover: Option<gtk::gdk::Texture>,
+}
+
+fn read_song(path: &std::path::Path) -> Song {
+    use lofty::prelude::*;
+    let Ok(f) = lofty::read_from_path(path) else { return Song::default() };
+    let p = f.properties();
+    let mut s = Song {
+        secs: p.duration().as_secs(),
+        kbps: p.audio_bitrate(),
+        ..Default::default()
+    };
+    if let Some(t) = f.primary_tag().or_else(|| f.first_tag()) {
+        s.title = t.title().map(|x| x.into_owned());
+        s.artist = t.artist().map(|x| x.into_owned());
+        s.album = t.album().map(|x| x.into_owned());
+        s.year = t.date().map(|d| d.year);
+        s.cover = t
+            .pictures()
+            .iter()
+            .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+            .or(t.pictures().first())
+            .and_then(|p| gtk::gdk::Texture::from_bytes(&glib::Bytes::from(p.data())).ok());
+    }
+    s
+}
+
+/// A music file: cover art, title / artist / album, and a player that's only created when you
+/// press Play (preparing a stream for every file you select is slow, and a GStreamer failure on a
+/// broken file would take the whole app down with it).
+fn music(file: &gio::File, info: &gio::FileInfo) -> gtk::Box {
+    let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(6).build();
+    let art = gtk::Image::builder()
+        .pixel_size(160)
+        .icon_name("audio-x-generic")
+        .css_classes(["music-art"])
+        .build();
+    let pic = gtk::Picture::builder()
+        .can_shrink(true)
+        .content_fit(gtk::ContentFit::Contain)
+        .height_request(180)
+        .visible(false)
+        .css_classes(["music-art"])
+        .build();
+    let title = gtk::Label::builder()
+        .label(info.display_name().as_str())
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .css_classes(["title-3"])
+        .build();
+    let by = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build();
+    let meta = gtk::Label::builder().css_classes(["dim-label", "caption"]).visible(false).build();
+    let controls = gtk::MediaControls::builder().visible(false).hexpand(true).build();
+    let play = gtk::Button::builder()
+        .icon_name("media-playback-start-symbolic")
+        .tooltip_text("Play")
+        .halign(gtk::Align::Center)
+        .width_request(56)
+        .height_request(56)
+        .css_classes(["circular", "suggested-action", "music-play"])
+        .build();
+    for w in [
+        art.upcast_ref::<gtk::Widget>(),
+        pic.upcast_ref(),
+        title.upcast_ref(),
+        by.upcast_ref(),
+        meta.upcast_ref(),
+        play.upcast_ref(),
+        controls.upcast_ref(),
+    ] {
+        card.append(w);
+    }
+    let (f, c2, card2) = (file.clone(), controls.clone(), card.clone());
+    play.connect_clicked(move |b| {
+        let m = gtk::MediaFile::for_file(&f);
+        say_media_errors(m.upcast_ref(), &card2);
+        c2.set_media_stream(Some(&m));
+        m.play();
+        b.set_visible(false);
+        c2.set_visible(true);
+    });
+    // stop when the preview moves on to another file
+    controls.connect_unmap(|c| {
+        if let Some(m) = c.media_stream() {
+            m.pause();
+        }
+    });
+    if let Some(path) = file.path() {
+        glib::spawn_future_local(async move {
+            let Ok(s) = gio::spawn_blocking(move || read_song(&path)).await else { return };
+            if let Some(t) = &s.title {
+                title.set_label(t);
+            }
+            let who: Vec<&str> = [s.artist.as_deref(), s.album.as_deref()].into_iter().flatten().collect();
+            by.set_label(&who.join(" \u{2014} "));
+            by.set_visible(!who.is_empty());
+            let mut bits = Vec::new();
+            if let Some(y) = s.year {
+                bits.push(y.to_string());
+            }
+            if s.secs > 0 {
+                bits.push(format!("{}:{:02}", s.secs / 60, s.secs % 60));
+            }
+            if let Some(k) = s.kbps.filter(|k| *k > 0) {
+                bits.push(format!("{k} kbps"));
+            }
+            meta.set_label(&bits.join(" \u{b7} "));
+            meta.set_visible(!bits.is_empty());
+            if let Some(t) = s.cover {
+                pic.set_paintable(Some(&t));
+                pic.set_visible(true);
+                art.set_visible(false);
+            }
+        });
+    }
+    card
+}
+
+/// A stream that can't play (no codec for it, a broken file) says so under the player instead of
+/// sitting there black or silent.
+fn say_media_errors(m: &gtk::MediaStream, under: &gtk::Box) {
+    let under = under.downgrade();
+    m.connect_error_notify(move |m| {
+        let (Some(e), Some(b)) = (m.error(), under.upgrade()) else { return };
+        let why = if e.matches(gio::IOErrorEnum::NotSupported) || e.message().contains("codec") || e.message().contains("plugin") {
+            "Can't play this: no codec for its format is installed (sudo apt install gstreamer1.0-libav)".to_string()
+        } else {
+            format!("Can't play this: {}", crate::browser::human_gio(&e))
+        };
+        b.append(&gtk::Label::builder().label(why).wrap(true).css_classes(["error", "caption"]).build());
+    });
+}
+
+/// GTK's loaders (glycin: sandboxed, most formats), then gdk-pixbuf's (a few glycin lacks, e.g. XBM).
+fn load_image(f: &gio::File) -> Option<gtk::gdk::Texture> {
+    gtk::gdk::Texture::from_file(f).ok().or_else(|| {
+        let pb = gtk::gdk_pixbuf::Pixbuf::from_file(f.path()?).ok()?;
+        #[allow(deprecated)] // for_pixbuf: the only way from a Pixbuf to a Texture in gtk4-rs
+        Some(gtk::gdk::Texture::for_pixbuf(&pb))
+    })
+}
+
 fn is_office(ct: &str) -> bool {
     [
         "application/msword",
@@ -314,8 +544,9 @@ fn md_markup(src: &str) -> String {
             E::TaskListMarker(done) => out.push_str(if done { "☑ " } else { "☐ " }),
             E::End(TE::TableCell) => out.push_str("  │  "),
             E::End(TE::TableHead) | E::End(TE::TableRow) => out.push('\n'),
-            // raw HTML shows as written rather than vanishing
-            E::Text(t) | E::Html(t) | E::InlineHtml(t) => out.push_str(&esc(&t)),
+            E::Text(t) => out.push_str(&esc(&t)),
+            // raw HTML (a README's centring <div>, badges): the text between the tags, not the tags
+            E::Html(t) | E::InlineHtml(t) => out.push_str(&esc(&strip_tags(&t))),
             E::SoftBreak => out.push(' '),
             E::HardBreak => out.push('\n'),
             E::Rule => out.push_str("────────────\n\n"),
@@ -421,17 +652,45 @@ impl Preview {
         // the big visual
         let visual = gtk::Box::builder().orientation(gtk::Orientation::Vertical).halign(gtk::Align::Fill).build();
         if ct.starts_with("image/") && file.is_native() {
-            let pic = gtk::Picture::for_file(&file);
-            pic.set_can_shrink(true);
-            pic.set_content_fit(gtk::ContentFit::Contain);
-            pic.set_height_request(260);
+            // decoded off the GTK thread (a 50-megapixel photo takes a while); says why if it can't
+            let pic = gtk::Picture::builder()
+                .can_shrink(true)
+                .content_fit(gtk::ContentFit::Contain)
+                .height_request(260)
+                .build();
             visual.append(&pic);
-        } else if (ct.starts_with("video/") || ct.starts_with("audio/")) && file.is_native() {
+            let (f, pic2) = (file.clone(), pic.clone());
+            glib::spawn_future_local(async move {
+                match gio::spawn_blocking(move || load_image(&f)).await {
+                    Ok(Some(t)) => pic2.set_paintable(Some(&t)),
+                    _ => {
+                        if let Some(parent) = pic2.parent().and_downcast::<gtk::Box>() {
+                            parent.remove(&pic2);
+                            parent.append(
+                                &gtk::Label::builder()
+                                    .label("No preview for this image format")
+                                    .css_classes(["dim-label"])
+                                    .build(),
+                            );
+                        }
+                    }
+                }
+            });
+        } else if ct == "application/x-openzim"
+            && let Some(path) = file.path()
+        {
+            visual.append(&zim_card(path, info));
+        } else if ct.starts_with("audio/") && file.is_native() {
+            visual.append(&music(&file, info));
+        } else if ct.starts_with("video/") && file.is_native() {
             let v = gtk::Video::for_file(Some(&file));
             v.set_autoplay(false);
-            v.set_height_request(if ct.starts_with("video/") { 220 } else { 60 });
+            v.set_height_request(220);
             visual.append(&v);
-        } else if (ct == "application/pdf" || is_office(&ct))
+            if let Some(m) = v.media_stream() {
+                say_media_errors(&m, &visual);
+            }
+        } else if (ct == "application/pdf" || ct == "application/illustrator" || is_office(&ct))
             && let Some(path) = file.path()
         {
             // the icon stands in while the document opens and the first page renders
@@ -515,6 +774,58 @@ impl Preview {
                 });
                 pic.add_controller(scroll);
                 pager.go(1);
+            });
+        } else if crate::whiteboard::is_whiteboard(&info.name().to_string_lossy(), &ct)
+            && let Some(p) = file.path()
+        {
+            // a Nextcloud / Excalidraw drawing, drawn on a page like a PDF's
+            let pic = gtk::Picture::builder()
+                .can_shrink(true)
+                .content_fit(gtk::ContentFit::Contain)
+                .height_request(300)
+                .css_classes(["card", "md-page"])
+                .build();
+            visual.append(&pic);
+            let pic2 = pic.clone();
+            glib::spawn_future_local(async move {
+                let drawn = gio::spawn_blocking(move || {
+                    let json = std::fs::read_to_string(&p).ok().filter(|j| j.len() < 64 << 20)?;
+                    let svg = crate::whiteboard::to_svg(&json)?;
+                    gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(svg.into_bytes())).ok()
+                })
+                .await;
+                match drawn {
+                    Ok(Some(t)) => pic2.set_paintable(Some(&t)),
+                    _ => pic2.set_alternative_text(Some("Can't draw this whiteboard")),
+                }
+            });
+        } else if gio::content_type_is_a(&ct, "text/markdown")
+            && let Some(p) = file.path()
+        {
+            // rendered onto a page, where PDF and Office documents show theirs
+            let lbl = gtk::Label::builder()
+                .use_markup(true)
+                .wrap(true)
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
+                .xalign(0.0)
+                .yalign(0.0)
+                .selectable(true)
+                .margin_start(18)
+                .margin_end(18)
+                .margin_top(16)
+                .margin_bottom(16)
+                .build();
+            let page = gtk::ScrolledWindow::builder()
+                .child(&lbl)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .height_request(340)
+                .css_classes(["card", "md-page"])
+                .build();
+            visual.append(&page);
+            glib::spawn_future_local(async move {
+                if let Ok(text) = gio::spawn_blocking(move || read_head(&p)).await {
+                    lbl.set_markup(&md_markup(&text));
+                }
             });
         } else if thumbs::can_thumbnail(info) {
             let pic = gtk::Picture::builder()
@@ -621,60 +932,186 @@ impl Preview {
                     }
                 });
             }
-        } else if gio::content_type_is_a(&ct, "text/markdown")
-            && let Some(p) = file.path()
-        {
-            let lbl = gtk::Label::builder()
-                .use_markup(true)
-                .label(md_markup(&read_head(&p)))
-                .wrap(true)
-                .wrap_mode(gtk::pango::WrapMode::WordChar)
-                .xalign(0.0)
-                .selectable(true)
-                .margin_start(12)
-                .margin_end(12)
-                .margin_top(12)
-                .margin_bottom(12)
-                .build();
-            let card = gtk::Box::builder().css_classes(["card"]).build();
-            card.append(&lbl);
-            self.body.append(&card);
-        } else if gio::content_type_is_a(&ct, "text/plain")
-            && let Some(p) = file.path()
-        {
-            self.body.append(&text_card(&read_head(&p)));
-        } else if crate::archive::archive_ext(&info.name().to_string_lossy()).is_some()
-            && let Some(p) = file.path().and_then(|p| p.canonicalize().ok())
-        {
+        } else if crate::whiteboard::is_whiteboard(&info.name().to_string_lossy(), &ct) {
+            // drawn at the top (it's JSON, so text/plain would dump it here)
+        } else if gio::content_type_is_a(&ct, "text/markdown") {
+            // shown as a page at the top (and markdown is a text/plain, so it must stop here)
+        } else if let Some(p) = file.path() {
+            // decided by the content, not the suffix: .vhd is a disk image or VHDL source, .ts MPEG
+            // video or TypeScript, and GIO types many text formats (.pem, ASCII .dxf/.stl…) as
+            // binary by name (search results aren't sniffed at all)
+            let archive = crate::archive::archive_ext(&info.name().to_string_lossy()).is_some();
             let lbl = gtk::Label::builder()
                 .label("Reading archive…")
                 .xalign(0.0)
                 .wrap(true)
+                .visible(archive)
                 .css_classes(["dim-label"])
                 .build();
             self.body.append(&lbl);
-            let (body, serial, me_serial) = (self.body.clone(), self.serial.get(), self.serial.clone());
+            let (body, grid, serial, me_serial) = (self.body.clone(), grid.clone(), self.serial.get(), self.serial.clone());
             glib::spawn_future_local(async move {
                 let r = gio::spawn_blocking(move || {
-                    let scratch = cache_root().join("list");
-                    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
-                    crate::archive::list_archive(&p, &scratch).map(|e| archive_text(&e))
+                    if let Some(t) = sniff_text(&p) {
+                        return (None, Ok(Body::Text(t)));
+                    }
+                    let kind = binary_kind(&read_bytes(&p, 4096));
+                    if !archive {
+                        return (kind, Ok(Body::Nothing));
+                    }
+                    let list = p.canonicalize().map_err(|e| e.to_string()).and_then(|p| {
+                        let scratch = cache_root().join("list");
+                        std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+                        crate::archive::list_archive(&p, &scratch)
+                    });
+                    (kind, list.map(|e| archive_text(&e)).map(|(sum, l)| Body::Listing(sum, l)))
                 })
                 .await
-                .unwrap_or_else(|_| Err("Couldn't read this archive".into()));
+                .unwrap_or((None, Err("Couldn't read this archive".into())));
                 if me_serial.get() != serial {
                     return;
                 }
-                match r {
-                    Ok((summary, list)) => {
+                if let Some(k) = r.0 {
+                    row(&grid, 6, "Format", &k);
+                }
+                match r.1 {
+                    Ok(Body::Text(text)) => {
+                        lbl.set_visible(false);
+                        if text.contains("PRIVATE KEY-----") {
+                            body.append(
+                                &gtk::Label::builder()
+                                    .label("Private key: contents not shown")
+                                    .xalign(0.0)
+                                    .css_classes(["dim-label"])
+                                    .build(),
+                            );
+                        } else {
+                            body.append(&text_card(&text));
+                        }
+                    }
+                    Ok(Body::Listing(summary, list)) => {
                         lbl.set_label(&summary);
                         body.append(&text_card(&list));
                     }
+                    Ok(Body::Nothing) => {}
                     Err(e) => lbl.set_label(&e),
                 }
             });
         }
     }
+}
+
+/// What goes under the details: the file as text, or an archive's summary and listing.
+enum Body {
+    Text(String),
+    Listing(String, String),
+    Nothing,
+}
+
+fn read_bytes(p: &std::path::Path, n: u64) -> Vec<u8> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    if let Ok(f) = std::fs::File::open(p) {
+        let _ = f.take(n).read_to_end(&mut buf);
+    }
+    buf
+}
+
+/// What a binary really is, from its magic bytes (the suffix can lie, and ELF programs have none).
+fn binary_kind(h: &[u8]) -> Option<String> {
+    let u16le = |o: usize| h.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let u32le = |o: usize| h.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let u32be = |o: usize| h.get(o..o + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
+    if h.starts_with(b"\x7fELF") {
+        let bits = if h.get(4) == Some(&2) { "64-bit" } else { "32-bit" };
+        let be = h.get(5) == Some(&2);
+        let rd = |o: usize| {
+            h.get(o..o + 2).map(|b| {
+                if be {
+                    u16::from_be_bytes([b[0], b[1]])
+                } else {
+                    u16::from_le_bytes([b[0], b[1]])
+                }
+            })
+        };
+        let what = match rd(16)? {
+            1 => "object file (.o, kernel module)",
+            2 => "program",
+            3 => "program or shared library",
+            4 => "core dump",
+            _ => "file",
+        };
+        let arch = match rd(18)? {
+            3 => "x86",
+            0x3e => "x86-64",
+            0x28 => "ARM",
+            0xb7 => "ARM64",
+            0xf3 => "RISC-V",
+            8 => "MIPS",
+            0x14 => "PowerPC",
+            0x15 => "PowerPC 64",
+            0x5e => "Xtensa (ESP32)",
+            0xf7 => "BPF",
+            _ => "other CPU",
+        };
+        // an AppImage's runtime marks itself in the ELF padding
+        let app = if h.get(8..11) == Some(b"AI\x02") { "AppImage, " } else { "" };
+        return Some(format!("{app}Linux {what}, {bits} {arch}"));
+    }
+    if h.starts_with(b"MZ") {
+        let pe = u32le(0x3c)? as usize;
+        if h.get(pe..pe + 4) != Some(b"PE\0\0") {
+            return Some("DOS program".into());
+        }
+        let arch = match u16le(pe + 4)? {
+            0x14c => "x86",
+            0x8664 => "x86-64",
+            0xaa64 => "ARM64",
+            0x1c4 => "ARM",
+            _ => "other CPU",
+        };
+        let what = match (u16le(pe + 24 + 68), u16le(pe + 22).unwrap_or(0) & 0x2000 != 0) {
+            (Some(10..=13), _) => "UEFI program",
+            (Some(1), _) => "Windows driver",
+            (_, true) => "Windows library (DLL)",
+            _ => "Windows program",
+        };
+        return Some(format!("{what}, {arch}"));
+    }
+    match u32be(0)? {
+        0xfeedfacf | 0xcffaedfe => return Some("macOS program or library, 64-bit".into()),
+        0xfeedface | 0xcefaedfe => return Some("macOS program or library, 32-bit".into()),
+        // shared by fat Mach-O and Java: a class file's version is ≥ 45, a fat binary's arch count tiny
+        0xcafebabe if u32be(4)? >= 45 => return Some(format!("Java class (Java {})", u16::from_be_bytes([h[6], h[7]]).saturating_sub(44))),
+        0xcafebabe => return Some("macOS universal program or library".into()),
+        _ => {}
+    }
+    let kind = if h.starts_with(b"\0asm") {
+        "WebAssembly module"
+    } else if h.starts_with(b"UF2\n") {
+        "UF2 firmware (microcontroller)"
+    } else if h.starts_with(b"!<arch>\n") {
+        "ar archive (static library or package)"
+    } else if h.starts_with(b"FOR1") && h.get(8..12) == Some(b"BEAM") {
+        "Erlang/Elixir bytecode"
+    } else if h.starts_with(b"\0\x09\x0f\xf0\x0f\xf0\x0f\xf0\x0f\xf0\0\0\x01") {
+        "FPGA bitstream (Xilinx)"
+    } else if h.get(2..4) == Some(b"\r\n") && u16le(0).is_some_and(|m| (3000..4000).contains(&m)) {
+        "Python bytecode"
+    } else {
+        return None;
+    };
+    Some(kind.into())
+}
+
+/// The file's head if it's text (UTF-8, no NULs, not empty), else None.
+fn sniff_text(p: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(p).ok()?.take(4096).read_to_end(&mut buf).ok()?;
+    // a multi-byte character cut off at the 4 KiB mark is still text
+    let utf8 = std::str::from_utf8(&buf).map_or_else(|e| e.error_len().is_none(), |_| true);
+    (!buf.is_empty() && !buf.contains(&0) && utf8).then(|| read_head(p))
 }
 
 /// Monospace, read-only, scrollable text in a card.
@@ -714,6 +1151,60 @@ mod tests {
     }
 
     #[test]
+    fn binary_kinds() {
+        let mut elf = b"\x7fELF\x02\x01\x01\0AI\x02\0\0\0\0\0\x02\0\x3e\0".to_vec();
+        assert_eq!(binary_kind(&elf).as_deref(), Some("AppImage, Linux program, 64-bit x86-64"));
+        elf[8] = 0;
+        elf[16] = 1;
+        elf[18] = 0xb7;
+        assert_eq!(binary_kind(&elf).as_deref(), Some("Linux object file (.o, kernel module), 64-bit ARM64"));
+        let mut pe = vec![0u8; 0x200];
+        pe[..2].copy_from_slice(b"MZ");
+        pe[0x3c] = 0x80;
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        pe[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes());
+        pe[0x80 + 22..0x80 + 24].copy_from_slice(&0x2000u16.to_le_bytes());
+        assert_eq!(binary_kind(&pe).as_deref(), Some("Windows library (DLL), x86-64"));
+        pe[0x80 + 92] = 10;
+        assert_eq!(binary_kind(&pe).as_deref(), Some("UEFI program, x86-64"));
+        assert_eq!(binary_kind(b"\xca\xfe\xba\xbe\0\0\0\x41").as_deref(), Some("Java class (Java 21)"));
+        assert_eq!(
+            binary_kind(b"\xca\xfe\xba\xbe\0\0\0\x02").as_deref(),
+            Some("macOS universal program or library")
+        );
+        assert_eq!(binary_kind(b"\0asm\x01\0\0\0").as_deref(), Some("WebAssembly module"));
+        assert_eq!(binary_kind(b"\xcb\x0d\r\n").as_deref(), Some("Python bytecode"));
+        assert!(binary_kind(b"PK\x03\x04").is_none());
+        // real files on this machine, when present
+        for (f, want) in [
+            ("/usr/bin/true", "Linux program or shared library, 64-bit x86-64"),
+            ("/usr/lib/kestrel/7zz", "Linux program"),
+        ] {
+            if let Ok(b) = std::fs::read(f) {
+                assert!(binary_kind(&b[..4096.min(b.len())]).is_some_and(|k| k.contains(want)), "{f}");
+            }
+        }
+        assert!(binary_kind(b"").is_none());
+    }
+
+    #[test]
+    fn sniffs_text() {
+        let d = std::env::temp_dir().join(format!("kestrel-sniff-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let w = |n: &str, b: &[u8]| {
+            std::fs::write(d.join(n), b).unwrap();
+            sniff_text(&d.join(n))
+        };
+        assert_eq!(w("a.dxf", b"0\nSECTION\n").as_deref(), Some("0\nSECTION\n"));
+        let cut = format!("a{}", "é".repeat(2048)); // the 4 KiB read ends mid-character
+        assert!(w("b.json", cut.as_bytes()).is_some());
+        assert!(w("c.stl", b"\x80\x00binary").is_none());
+        assert!(w("d.bin", &[0xff, 0xfe, 0x41]).is_none());
+        assert!(w("e.txt", b"").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn markdown_is_valid_pango() {
         let md = "# T <x>\n\nSome **bold** & *it* `c<d>` [link](http://a?b=1&c=2)\n\n- a\n  1. one\n  2. two\n- [x] done\n\n> quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\nfn x() {}\n```\n---\n";
         let m = md_markup(md);
@@ -721,7 +1212,11 @@ mod tests {
         let (pre, post) = m.split_once("<a href=").unwrap();
         let plain = format!("{pre}{}", post.split_once('>').unwrap().1.replacen("</a>", "", 1));
         gtk::pango::parse_markup(&plain, '\0').unwrap();
-        assert!(m.contains("<b>bold</b>") && m.contains("2. two") && m.contains("☑") && m.contains("&lt;x&gt;"));
+        assert!(m.contains("<b>bold</b>") && m.contains("2. two") && m.contains("☑") && m.contains("c&lt;d&gt;"));
+        // raw HTML: tags dropped, text kept
+        assert!(!m.contains("&lt;x&gt;"));
+        let h = md_markup("<div align=\"center\">\n<img src=\"a.svg\" alt=\"icon\">\n\nHello <b>there</b>\n</div>\n");
+        assert!(!h.contains("div") && !h.contains("img") && h.contains("there"), "{h}");
         assert!(is_office("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
         assert!(!is_office("application/pdf"));
     }

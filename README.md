@@ -66,11 +66,16 @@ the results only ever include files you could find yourself.
 **Archives**
 - Extract Here / Extract To… for [70 formats](docs/extract-formats.md): zip, 7z, rar, tarballs, cab, iso, dmg, vhd(x), qcow2, deb, rpm, msi, wim, squashfs…
 - Split and multi-volume sets (`.001`, `.z01`, `.part1.rar`, `.r00`), password prompts, progress with time left, Cancel
-- Double-click a zip, 7z, rar or tarball to browse it like a folder
+- Double-click a zip, rar or tarball to browse it like a folder
 - Every format is checked by an automated test
 
 **Previews**
-- Images, video and audio, text, rendered Markdown
+- Every image format your system can decode (PNG, JPEG, WebP, AVIF, HEIC, JPEG XL, SVG, BMP, TIFF, GIF, ICO, TGA, QOI…)
+- Video and music in every common codec; music shows its cover art, title, artist and album
+- Text, and Markdown rendered as a page like PDFs
+- Kiwix `.zim` archives (offline Wikipedia and friends): title, description, article count
+- Nextcloud Whiteboard and Excalidraw drawings (`.whiteboard`, `.excalidraw`), drawn
+- Thumbnails for PDFs, documents, images and video in every view
 - PDF, Word, Excel, PowerPoint and OpenDocument pages, one at a time
 - Archive contents; folder totals (instant, from the index)
 
@@ -139,6 +144,7 @@ your default file manager, switch it on in **Preferences**.
 | gvfs-backends | browsing inside archives; network places (SFTP, SMB…) |
 | poppler-utils | PDF previews |
 | libreoffice-writer, -calc, -impress | Word, Excel, PowerPoint and OpenDocument previews |
+| gstreamer1.0-libav, -plugins-good, -bad, -ugly | playing every common audio and video codec |
 | ncompress | `.tar.z` / `.taz` |
 | xdg-terminal-exec | "Open in Terminal" with your chosen terminal |
 
@@ -171,7 +177,7 @@ sudo apt install zip rar arj gcab xar wimtools msitools rpm genisoimage squashfs
 | `!tmp` | names without "tmp" |
 | `*.rs` · `IMG_????.jpg` | wildcards (they match the whole name) |
 | `.iso` · `excel` | that type first; type words also match the type |
-| `ext:jpg;png` · `pic:` `audio:` `video:` `doc:` `zip:` `exe:` | by extension or kind |
+| `ext:jpg;png` · `pic:` `audio:` `video:` `doc:` `zip:` `exe:` `diagram:` `cad:` `gis:` `data:` `cert:` `lib:` `code:` `font:` | by extension or kind |
 | `size:>1gb` · `size:huge` | by size |
 | `dm:today` · `dm:last2weeks` · `dm:2026-10` | by date modified (`dc:` created, `da:` accessed) |
 | `under:~/Projects` · `parent:/etc` · `depth:<3` | by place |

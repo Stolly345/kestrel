@@ -3,7 +3,7 @@
 //! `a b` AND, `a|b` OR (binds tighter than AND), `!a` NOT, `"a b"` literal with spaces.
 //! Wildcards `*` `?` match the whole name. A term containing `/` matches the full path.
 //! Modifiers: `case:` `nocase:` `regex:` `path:` `file:` `folder:` `ext:a;b` `size:` `dm:`,
-//! macros `audio:` `video:` `pic:` `doc:` `zip:` `exe:`, `tag:red;blue`, `parent:/dir` (direct
+//! macros `audio:` `video:` `pic:` `doc:` `zip:` `exe:` `diagram:` `cad:` `gis:` `data:` `cert:` `lib:` `code:` `font:`, `tag:red;blue`, `parent:/dir` (direct
 //! children), `under:/dir` (everything below), `depth:2` `depth:<3`, `empty:` (empty folders),
 //! `content:text` (reads files; slow), `dupe:` (same name), `sizedupe:` (same size),
 //! `namesizedupe:` (both).
@@ -255,12 +255,56 @@ fn tokens(s: &str) -> Vec<String> {
 
 fn macro_exts(m: &str) -> Option<&'static str> {
     Some(match m {
-        "audio" => "mp3;flac;wav;ogg;opus;m4a;aac;wma;aiff",
-        "video" => "mp4;mkv;avi;mov;webm;wmv;m4v;mpg;mpeg;ts",
-        "pic" => "jpg;jpeg;png;gif;bmp;webp;heic;tif;tiff;svg;avif",
-        "doc" => "pdf;doc;docx;odt;txt;md;rtf;xls;xlsx;ods;ppt;pptx;odp;csv",
-        "zip" => "zip;7z;rar;tar;gz;xz;bz2;zst;tgz",
-        "exe" => "sh;appimage;deb;rpm;run;bin;exe;msi",
+        "audio" => concat!(
+            "mp3;flac;wav;ogg;opus;m4a;aac;wma;aiff;aif;mpc;ra;amr;ac3;dts;ape;wv;tak;tta;shn;caf;w64;rf64;pcm;dsf;dff;",
+            "mid;midi;kar;mod;xm;it;s3m;nsf;spc;sid;sf2;sfz;",
+            "als;flp;logicx;ardour;rpp;ptx;cpr;mmpz;mscz;musicxml;mxl;gp;gp5"
+        ),
+        "video" => concat!(
+            "mp4;mkv;avi;mov;webm;wmv;m4v;mpg;mpeg;ts;m2ts;mts;ogv;3gp;3g2;asf;flv;vob;rm;rmvb;divx;f4v;m3u8;mpd;",
+            "mxf;braw;r3d;ari;crm;y4m;yuv;prproj;drp;fcpxml;kdenlive;mlt;osp;aep;edl;otio;",
+            "srt;vtt;sub;ass;ssa;idx;sup;pgs;ttml;dfxp"
+        ),
+        "pic" => concat!(
+            "jpg;jpeg;png;gif;bmp;webp;heic;heif;tif;tiff;svg;svgz;avif;jxl;jp2;apng;tga;pcx;ico;icns;",
+            "hdr;exr;dpx;cin;fits;dng;cr2;cr3;nef;arw;raf;orf;rw2;pef;iiq;3fr;x3f;eps;ai;cdr;wmf;emf;cgm;",
+            "psd;psb;xcf;afphoto;afdesign;kra;ora;clip;procreate;sketch;indd;idml;sla"
+        ),
+        "doc" => concat!(
+            "pdf;doc;docx;odt;txt;md;rtf;xls;xlsx;ods;ppt;pptx;odp;csv;tsv;wpd;pages;abw;wps;rst;adoc;org;",
+            "tex;bib;typ;dvi;ps;lyx;roff;man;xlsb;numbers;wk1;wks;dif;gnumeric;key;pps;ppsx;",
+            "epub;mobi;azw3;fb2;djvu;lit;chm;cbz;cbr;cb7;cbt"
+        ),
+        "zip" => concat!(
+            "zip;7z;rar;tar;gz;xz;bz2;zst;tgz;ace;arj;lzh;lha;arc;zoo;sit;sitx;pea;cab;lz4;lz;lzma;z;br;cpio;",
+            "z01;001;par;par2;iso;img;dmg;qcow2;vmdk;vdi;vhd;vhdx;squashfs;cue;mdf;mds;nrg"
+        ),
+        "exe" => concat!(
+            "sh;appimage;deb;rpm;run;bin;exe;msi;app;com;scr;wasm;efi;out;elf;pkg;flatpak;flatpakref;snap;apk;ipk;msix;appx;ebuild;",
+            "rom;uf2;hex;bit;gbr;gerber;kicad_pcb"
+        ),
+        "lib" => "dll;so;dylib;ko;sys;a;lib;o;obj;jar;whl;pyc;class;war;ear;nupkg;gem;beam;rlib",
+        "code" => concat!(
+            "sh;bash;zsh;fish;ps1;bat;cmd;awk;sed;mk;dockerfile;containerfile;justfile;",
+            "c;h;cpp;cc;hpp;rs;go;zig;cs;java;kt;swift;dart;v;sv;vhd;vhdl;",
+            "py;ipynb;js;mjs;ts;lua;rb;php;pl;r;jl;tcl;",
+            "html;htm;css;scss;sass;less;jsx;tsx;vue;svelte;astro;wasm"
+        ),
+        "font" => "ttf;otf;ttc;woff;woff2;eot;bdf;pcf",
+        "diagram" => {
+            "excalidraw;fig;rtb;tldraw;tldr;canvas;one;onepkg;xopp;jam;drawio;dio;vsdx;vsd;omni;graffle;dia;gliffy;mmd;mermaid;puml;iuml;gv;dot;d2;xmind;mm;mmap;opml;smmx"
+        }
+        "cad" => concat!(
+            "dwg;dxf;step;stp;iges;igs;sat;x_t;x_b;fcstd;scad;sldprt;sldasm;ipt;iam;rvt;ifc;3dm;catpart;prt;skp;pln;",
+            "stl;obj;3mf;gcode;bgcode;amf;ctb;goo;blend;fbx;gltf;glb;usd;usda;usdc;usdz;abc;dae;ply;vdb"
+        ),
+        "gis" => "kml;kmz;gpx;geojson;shp;shx;dbf;geotiff;las;laz;osm;pbf;kap;bsb;s57;s63;fpl",
+        "data" => concat!(
+            "json;jsonc;json5;yaml;yml;xml;toml;ini;env;hcl;tf;nix;kdl;plist;conf;cfg;",
+            "parquet;avro;orc;arrow;feather;protobuf;pb;msgpack;cbor;bson;hdf5;h5;nc;",
+            "db;sqlite;sqlite3;sql;mdb;accdb;dbf;frm;ibd;wal;shm;rrd"
+        ),
+        "cert" => "pem;crt;cer;key;pub;pfx;p12;der;csr;asc;gpg;pgp;kdbx;age",
         _ => return None,
     })
 }
@@ -614,6 +658,14 @@ mod tests {
         assert_eq!(names(&ix, "notes"), ["notes.txt"]);
         assert_eq!(names(&ix, "ext:jpg"), ["Photo.JPG"]);
         assert_eq!(names(&ix, "pic:"), ["Photo.JPG"]);
+        for m in [
+            "audio", "video", "pic", "doc", "zip", "exe", "diagram", "cad", "gis", "data", "cert", "lib", "code", "font",
+        ] {
+            let l = ext_list(macro_exts(m).unwrap());
+            assert!(l.iter().all(|e| !e.is_empty() && !e.contains(&b' ')), "{m}: stray separator");
+            assert_eq!(l.iter().collect::<std::collections::HashSet<_>>().len(), l.len(), "{m}: duplicate");
+        }
+        assert!(names(&ix, "cad: | gis: | cert:").is_empty());
         assert!(names(&ix, "case:photo").is_empty());
         assert_eq!(names(&ix, "case:Photo"), ["Photo.JPG"]);
         assert_eq!(names(&ix, "*.rs"), ["main.rs"]);

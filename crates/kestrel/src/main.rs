@@ -18,7 +18,9 @@ mod sidebar;
 mod tags;
 mod term;
 mod thumbs;
+mod whiteboard;
 mod window;
+mod zim;
 
 use adw::prelude::*;
 use browser::{Loc, Mode};
@@ -26,6 +28,7 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 const CSS: &str = "
+.md-page, .md-page > viewport { background: #ffffff; color: #1e1e1e; }
 levelbar.usage block.used { background: @accent_bg_color; }
 levelbar.usage block.nearly-full { background: @error_bg_color; }
 levelbar.usage trough { min-height: 4px; }
@@ -236,14 +239,22 @@ fn main() -> glib::ExitCode {
         // headless testing: select, then run actions, once the folder has loaded
         let (wc, args2) = (w.clone(), args.clone());
         glib::timeout_add_local_once(std::time::Duration::from_millis(600), move || {
-            if let Some(b) = wc.current().filter(|_| !args2.select.is_empty()) {
-                b.select_names(&args2.select);
-            }
-            for a in &args2.actions {
-                let (name, target) = a.split_once("::").map_or((a.as_str(), None), |(n, t)| (n, Some(t.to_variant())));
-                if let Err(e) = WidgetExt::activate_action(&wc.window, &format!("win.{name}"), target.as_ref()) {
-                    eprintln!("action {name}: {e}");
+            let run = {
+                let wc = wc.clone();
+                let actions = args2.actions.clone();
+                move || {
+                    for a in &actions {
+                        let (name, target) = a.split_once("::").map_or((a.as_str(), None), |(n, t)| (n, Some(t.to_variant())));
+                        if let Err(e) = WidgetExt::activate_action(&wc.window, &format!("win.{name}"), target.as_ref()) {
+                            eprintln!("action {name}: {e}");
+                        }
+                    }
                 }
+            };
+            match wc.current().filter(|_| !args2.select.is_empty()) {
+                // a slow folder (USB disk, network) may still be listing: select once it's loaded
+                Some(b) => b.select_when_loaded(args2.select.clone(), run),
+                None => run(),
             }
         });
         // debug: KESTREL_WIDTHS=1 prints each widget's minimum width (find what makes the window too wide)

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Types GNOME doesn't know yet, so Kestrel (and every other app) can name and preview them. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.excalidraw+json">
+    <comment>Whiteboard drawing</comment>
+    <sub-class-of type="application/json"/>
+    <generic-icon name="x-office-drawing"/>
+    <glob pattern="*.whiteboard"/>
+    <glob pattern="*.excalidraw"/>
+  </mime-type>
+</mime-info>

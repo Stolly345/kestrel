@@ -103,7 +103,7 @@ fn droppable(r: &gtk::ListBoxRow, target: gio::File, drop: &DropFn) {
     let drop = drop.clone();
     dt.connect_drop(move |t, v, _, _| {
         let Ok(list) = v.get::<gdk::FileList>() else { return false };
-        let actions = t.current_drop().map(|d| d.actions()).unwrap_or(gdk::DragAction::empty());
+        let actions = crate::fileops::drop_intent(t);
         drop(actions, list.files(), target.clone());
         true
     });

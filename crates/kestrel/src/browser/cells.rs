@@ -17,6 +17,7 @@ pub(crate) fn row_gestures(w: &gtk::Widget, item: &gtk::ListItem, b: &Weak<Brows
     });
     w.add_controller(g);
 
+    w.add_css_class("drag-item"); // see drag_beats_rubberband
     let ds = gtk::DragSource::builder().actions(gdk::DragAction::COPY | gdk::DragAction::MOVE).build();
     let (bw, iw) = (b.clone(), item.downgrade());
     ds.connect_prepare(move |_, _, _| {
@@ -50,7 +51,7 @@ pub(crate) fn folder_drop_target(w: &gtk::Widget, item: &gtk::ListItem, b: &Weak
             return false;
         };
         let files = list.files();
-        let actions = t.current_drop().map(|d| d.actions()).unwrap_or(gdk::DragAction::empty());
+        let actions = crate::fileops::drop_intent(t);
         b.ops.drop_files(actions, files, dest);
         true
     });

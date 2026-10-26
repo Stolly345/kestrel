@@ -247,6 +247,20 @@ fn same_fs(a: &gio::File, b: &gio::File) -> bool {
     id(a).is_some() && id(a) == id(b)
 }
 
+/// What the person asked for when dropping: Shift held = move, Ctrl = copy, neither = let
+/// drop_op decide. Read from the keys, not from the source's offered actions: a drag from the
+/// desktop (or another app) offers only "copy", which made every such drop a copy.
+pub fn drop_intent(t: &gtk::DropTarget) -> gdk::DragAction {
+    let mods = t.current_event_state();
+    if mods.contains(gdk::ModifierType::SHIFT_MASK) {
+        gdk::DragAction::MOVE
+    } else if mods.contains(gdk::ModifierType::CONTROL_MASK) {
+        gdk::DragAction::COPY
+    } else {
+        gdk::DragAction::empty()
+    }
+}
+
 /// What a drop does: Shift forces move, Ctrl copy; otherwise move within a filesystem, copy across.
 pub fn drop_op(actions: gdk::DragAction, files: &[gio::File], dest: &gio::File) -> Op {
     if actions == gdk::DragAction::MOVE {
@@ -1159,6 +1173,18 @@ mod tests {
         std::fs::write(d.join("src/a.txt"), "aaaa").unwrap();
         std::fs::write(d.join("src/sub/b.txt"), "bb").unwrap();
         gio::File::for_path(d)
+    }
+
+    #[test]
+    fn drops_move_on_the_same_drive_unless_ctrl() {
+        let d = tmp("dropop");
+        let files = [d.child("src/a.txt")];
+        let dest = d.child("dst");
+        // no keys held: the source's offered actions don't matter, the drive does
+        assert_eq!(drop_op(gdk::DragAction::empty(), &files, &dest), Op::Move);
+        assert_eq!(drop_op(gdk::DragAction::COPY, &files, &dest), Op::Copy); // Ctrl
+        assert_eq!(drop_op(gdk::DragAction::MOVE, &files, &dest), Op::Move); // Shift
+        let _ = std::fs::remove_dir_all(d.path().unwrap());
     }
 
     fn exists(f: &gio::File) -> bool {

@@ -49,6 +49,46 @@ impl Loc {
 /// A folder's title, worked out from its path/URI alone: never touches the disk or GVfs. A query
 /// here ran on the main thread and froze the window for 20+ s on a dead network mount (and on
 /// trash:///, whose backend checks every mount for a .Trash folder).
+/// Pressing on a file and dragging moves the file; only a press on empty space starts a rubber-band
+/// selection, as in GNOME Files. With rubber-banding always on, the list's own drag gesture beat
+/// the file's drag source and files couldn't be dragged anywhere.
+fn drag_beats_rubberband(view: &gtk::Widget, set: impl Fn(&gtk::Widget, bool) + 'static) {
+    let press = gtk::GestureClick::builder().button(1).propagation_phase(gtk::PropagationPhase::Capture).build();
+    press.connect_pressed(move |g, _, x, y| {
+        let Some(v) = g.widget() else { return };
+        let mut hit = v.pick(x, y, gtk::PickFlags::DEFAULT);
+        let mut on_item = false;
+        while let Some(w) = hit {
+            // the cell's padding counts too: no rubber band starts from a file's row or tile
+            let cell = matches!(w.type_().name(), "GtkColumnViewCellWidget" | "GtkListItemWidget" | "GtkGridViewChild");
+            if w.has_css_class("drag-item") || cell {
+                on_item = true;
+                break;
+            }
+            hit = w.parent();
+        }
+        set(&v, !on_item);
+    });
+    view.add_controller(press);
+}
+
+/// Space opens the preview, as in GNOME Files. The list widgets bind Space to "toggle this row's
+/// selection" and see the key before the window's shortcut does, so take it first.
+fn space_previews(view: &gtk::Widget) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(|k, key, _, mods| {
+        if key != gtk::gdk::Key::space
+            || mods.intersects(gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK | gtk::gdk::ModifierType::ALT_MASK)
+        {
+            return glib::Propagation::Proceed;
+        }
+        let _ = k.widget().and_then(|w| w.activate_action("win.preview", None).ok());
+        glib::Propagation::Stop
+    });
+    view.add_controller(keys);
+}
+
 pub fn dir_title(f: &gio::File) -> String {
     match f.path() {
         Some(p) if p == glib::home_dir() => "Home".into(),
@@ -254,8 +294,11 @@ impl Browser {
             },
             move |w, info| {
                 let img = w.first_child().and_downcast::<gtk::Image>().unwrap();
+                // every view makes missing thumbnails, so a PDF looks the same wherever it's listed
+                img.set_widget_name("");
                 set_icon(&img, info);
                 img.set_pixel_size(16);
+                crate::thumbs::load_into(&img, info);
                 let label = img.next_sibling().and_downcast::<gtk::Label>().unwrap();
                 // hl is only non-empty for search results (folder views never set it)
                 let terms = hl2.borrow();
@@ -398,6 +441,13 @@ impl Browser {
             .build();
 
         let miller = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        for v in [list.upcast_ref::<gtk::Widget>(), grid.upcast_ref(), miller.upcast_ref()] {
+            space_previews(v);
+        }
+        drag_beats_rubberband(list.upcast_ref(), |w, on| {
+            w.downcast_ref::<gtk::ColumnView>().unwrap().set_enable_rubberband(on)
+        });
+        drag_beats_rubberband(grid.upcast_ref(), |w, on| w.downcast_ref::<gtk::GridView>().unwrap().set_enable_rubberband(on));
         let miller_scroll = gtk::ScrolledWindow::builder().child(&miller).vscrollbar_policy(gtk::PolicyType::Never).build();
         let status = adw::StatusPage::new();
 
@@ -640,7 +690,7 @@ impl Browser {
             };
             let Some(dest) = b.dir() else { return false };
             let files = list.files();
-            let actions = t.current_drop().map(|d| d.actions()).unwrap_or(gdk::DragAction::empty());
+            let actions = crate::fileops::drop_intent(t);
             b.ops.drop_files(actions, files, dest);
             true
         });

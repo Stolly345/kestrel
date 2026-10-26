@@ -47,8 +47,10 @@ impl Browser {
                 return;
             };
             let img = row.first_child().and_downcast::<gtk::Image>().unwrap();
+            img.set_widget_name("");
             set_icon(&img, &info);
             img.set_pixel_size(16);
+            crate::thumbs::load_into(&img, &info);
             img.next_sibling().and_downcast::<gtk::Label>().unwrap().set_text(&info.display_name());
             row.last_child().unwrap().set_opacity(if is_dirlike(&info) { 0.5 } else { 0.0 });
         });

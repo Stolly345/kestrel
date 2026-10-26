@@ -421,6 +421,28 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.19 (2026-10-26): drops move.** A drop decided copy vs move from the source's offered actions,
+  treating "COPY only" as Ctrl held; drags from the desktop and other apps offer only COPY, so they always
+  copied. Now `fileops::drop_intent` reads the keys (Shift move, Ctrl copy) and otherwise drop_op moves on
+  the same filesystem, copies across, as GNOME Files does. Alex confirmed dropping from the desktop works.
+- **v0.9.18 (2026-10-26): thumbnails, whiteboards, drag.** PDF thumbnails: papers-thumbnailer's AppArmor
+  profile only lets it write /tmp/gnome-desktop-*, so Kestrel's scratch file in ~/.cache never got written
+  and no PDF ever got a thumbnail from Kestrel (pages showed only where GNOME Files had made one). Now
+  `glib::file_open_tmp("gnome-desktop-kestrel-XXXXXX.png")`, and the details and column views make missing
+  thumbnails like the grid (load_into). Nextcloud Whiteboard / Excalidraw drawings (.whiteboard, .excalidraw)
+  render in the preview (whiteboard.rs: scene JSON -> SVG; colours sanitised) and get a MIME type
+  (packaging/kestrel-mime.xml -> application/vnd.excalidraw+json, "Whiteboard drawing"). Drag and drop:
+  pressing on a file started a rubber-band selection, so files couldn't be dragged; rubber band now only from
+  empty space (drag_beats_rubberband). The XTest drop can't complete on bare Xvfb: FT_DND=1 on a desktop.
+- **v0.9.17 (2026-10-26, in progress): previews and feature test.** Images decode off the GTK thread
+  (glycin, then gdk-pixbuf; BMP was blank before; "No preview for this image format" otherwise). Music:
+  cover art, title/artist/album/length/bitrate (lofty), player created only on Play (GStreamer aborted the app
+  headless when every selected song pre-rolled). Plain-words error under audio/video that can't play;
+  gstreamer libav/good/bad/ugly Recommended (24 codecs checked). Markdown renders as a page in the top slot
+  like PDF/Office; raw HTML tags stripped. Kiwix .zim preview (zim.rs: header, binary search to namespace M,
+  zstd/xz clusters via the system tools; 16 real files incl. 110 GB Wikipedia < 1 s). Mouse back/forward
+  buttons. Space opens the preview (the list views ate it as select-toggle). `--select` waits for the folder
+  to load. scripts/feature-test.py: drives the real app through AT-SPI + XTest, ~50 user-level tests.
 - **v0.9.16 (2026-10-26): plain-words errors, search in the UI check.** Every error that reaches the
   screen goes through `browser::human_gio`/`human_io` ("You don't have permission", "The disk is full",
   "That drive or share isn't connected"; uncommon ones keep GIO's text, minus "(os error N)"); trash on a
