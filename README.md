@@ -2,6 +2,7 @@
 
 Everything-style instant whole-disk search inside a Files-style file manager, for Ubuntu
 (GNOME, GTK4/libadwaita). Written in Rust, shipped as a `.deb`. MIT licence.
+Current version: 0.9.14 (release notes: the status log at the end of `PRD.md`).
 
 - **kestrel** — the file manager: full-width search box, tabs, dual pane, details/grid/column
   views, preview pane (images, video, text, Markdown, PDF and Office pages, archive contents),
@@ -36,8 +37,10 @@ default file manager.
 | xdg-utils | default-file-manager hookup |
 | pkexec | "Start Service" and editing the index exclude list |
 
-7-Zip is bundled (`/usr/lib/kestrel/7zz`, 26.05): Ubuntu's 7zip lags on decoder security fixes
-and can't read RAR. Update it monthly with `scripts/update-7zip.sh VERSION`.
+7-Zip is bundled (`/usr/lib/kestrel/7zz`, 26.05 of 2026-10-21, the latest as of 2026-10-26):
+Ubuntu's 7zip lags on decoder security fixes and can't read RAR. Check
+https://github.com/ip7z/7zip/releases monthly and run `scripts/update-7zip.sh VERSION`; it
+verifies the download against GitHub's published SHA-256.
 
 **Recommended** (installed by default, skip with `--no-install-recommends`):
 
@@ -49,13 +52,17 @@ and can't read RAR. Update it monthly with `scripts/update-7zip.sh VERSION`.
 | ncompress | `.tar.z` / `.taz` |
 | xdg-terminal-exec | "Open in Terminal" with your chosen terminal |
 
-**Build:**
+**Build** (Rust 1.88 or newer, for `let` chains):
 
 ```
-sudo apt install libgtk-4-dev libadwaita-1-dev libgit2-dev libpoppler-glib-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libvte-2.91-gtk4-dev pkg-config
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
+  libvte-2.91-gtk4-dev zlib1g-dev
 cargo install cargo-deb
 ```
+
+libgit2 is compiled into Kestrel from source (no system libgit2 needed). PDF pages use the
+`poppler-utils` commands at run time and video goes through GTK's own GStreamer, so neither needs
+development packages.
 
 **Rebuilding the archive test samples** (only when adding or changing a format):
 

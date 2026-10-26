@@ -412,3 +412,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   counting XAR/.pkg folders as files (an entry with entries under it is a folder). every_format_extracts now
   requires preview count == extracted count and checks hello.txt inside disk images too; prints a per-format
   report with `-- --nocapture`. 70/70.
+- **Maintenance 2026-10-26.** Bundled 7-Zip 26.05 is the latest release (2026-10-21); re-fetched through
+  scripts/update-7zip.sh, digest-verified, byte-identical. Rust crates: all at newest compatible versions, no
+  newer majors for any direct dependency. Build-dependency list corrected (readelf -d): build-essential,
+  pkg-config, libgtk-4-dev, libadwaita-1-dev, libvte-2.91-gtk4-dev, zlib1g-dev; libgit2 is vendored and the
+  libgit2/poppler/gstreamer -dev packages were never needed. Every package named in README exists in 26.04.

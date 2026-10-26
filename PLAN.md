@@ -68,9 +68,12 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 
 ## Needs Alex (sudo)
 ```
-sudo apt install libgtk-4-dev libadwaita-1-dev libgit2-dev libpoppler-glib-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libvte-2.91-gtk4-dev pkg-config
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
+  libvte-2.91-gtk4-dev zlib1g-dev
 ```
+(Checked 2026-10-26 with `readelf -d`: the binary needs only GTK4, libadwaita, VTE, GLib/Pango/
+gdk-pixbuf/graphene and zlib; libgit2 is built in. The old list's libgit2/poppler/gstreamer -dev
+packages were never used.)
 Runtime, recommended, build and test-sample dependencies: README.md.
 
 ## As built (2026-10-25)
