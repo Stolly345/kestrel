@@ -1,4 +1,4 @@
-# Chimera — Product Requirements Document
+# Kestrel — Product Requirements Document
 
 | | |
 |---|---|
@@ -18,7 +18,7 @@ On Linux, finding a file is slow and lives in a separate place from managing fil
 
 **Search is the centre of the app, not a feature hidden inside it.**
 
-You open Chimera, and the cursor is already in one large search box in the middle of the top bar. Typing anything shows matching files from the whole disk within one keystroke. Browsing folders, previewing, tagging and moving files all happen around that search box. Search should never feel like a mode you switch into.
+You open Kestrel, and the cursor is already in one large search box in the middle of the top bar. Typing anything shows matching files from the whole disk within one keystroke. Browsing folders, previewing, tagging and moving files all happen around that search box. Search should never feel like a mode you switch into.
 
 ## 3. What went wrong in v0.1 (the build to date)
 
@@ -33,7 +33,7 @@ v0.1 proved the engine but got the product shape wrong.
 | Discoverability | The syntax is only in a dialog in the ⋮ menu. | Power features like `ext:`, `size:`, `dm:` and `dupe:` are invisible. |
 | Live behaviour | Never tested with the root daemon. | Unknown whether the index really stays live. |
 
-What carries forward unchanged: the index engine, the query language, the daemon, `cx`, file operations, tabs and dual pane, the preview pane, tags, Git status, packaging.
+What carries forward unchanged: the index engine, the query language, the daemon, `ks`, file operations, tabs and dual pane, the preview pane, tags, Git status, packaging.
 
 ## 4. Users
 
@@ -68,7 +68,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 │              │ 🔍  Search files…   ext:pdf  size:>1mb     ✕ │                        │
 │              └──────────────────────────────────────────────┘                        │
 ├────────────┬─────────────────────────────────────────────────────────────┬────────────┤
-│ Places     │ ⌂ › Projects › chimera                          [tab][tab]+ │  Preview   │  ← location bar
+│ Places     │ ⌂ › Projects › kestrel                          [tab][tab]+ │  Preview   │  ← location bar
 │ Bookmarks  │─────────────────────────────────────────────────────────────│            │     per pane
 │ Saved      │  Name              Folder            Size   Modified        │            │
 │ searches   │  ...                                                        │            │
@@ -96,7 +96,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **Columns:** Name (with matched text highlighted), Folder, Size, Modified, Type, plus Tags and Git when relevant. Sorting is done by the daemon, so it's instant at any size.
 - **Live summary in the status bar:** "N results · total size · query time", or the query error in red with where it went wrong.
 - **Filter chips** under the results: Type (Folders, Documents, Pictures, Audio, Video, Archives, Executables), Date modified, Size. A chip just adds or removes query terms, and the box shows the resulting text so it can be edited. Chips and syntax are two views of the same query.
-- **Empty and error states:** "No results" offers to widen the scope. If the daemon is down, there's a clear banner with a *Start service* action (via `pkexec systemctl start chimera-indexd`).
+- **Empty and error states:** "No results" offers to widen the scope. If the daemon is down, there's a clear banner with a *Start service* action (via `pkexec systemctl start kestrel-indexd`).
 - **Large result sets:** a million hits scroll smoothly through lazy paging, which v0.1 already does.
 
 ### 6.4 Search assistance
@@ -147,7 +147,7 @@ Priority: **P0** = v1 can't ship without it · **P1** = v1 should have it · **P
 | D1 | Indexes all local filesystems at boot; ready within 10 s of a cold boot | P0 | Measure on Alex's laptop with `systemd-analyze`-style timing |
 | D2 | Live updates through fanotify; changes searchable within 1 s | P0 | `scripts/smoke-live.sh` passes as root |
 | D3 | Recovers from event-queue overflow with a background rescan; searches keep working | P0 | |
-| D4 | Exclude list in `/etc/chimera/excludes`, default `/timeshift`; editable from Preferences | P0 / P1 | |
+| D4 | Exclude list in `/etc/kestrel/excludes`, default `/timeshift`; editable from Preferences | P0 / P1 | |
 | D5 | Results filtered per caller (mode bits); `content:` checks read permission before opening | P0 | Existing tests plus a root-run test |
 | D6 | ACL-aware permission filter | P1 | |
 | D7 | Saves the index to disk for a faster start, if D1 misses its target | P2 | |
@@ -172,7 +172,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F9 | Custom tag names, not just the 7 fixed colours | P2 |
 
 ### 7.5 CLI
-- `cx` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
+- `ks` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
 
 ---
 
@@ -198,13 +198,13 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | **M0: Verify** | Install the v0.1 `.deb`; run `smoke-live.sh`; measure cold boot | D1, D2, D3 pass or have bugs filed |
 | **M1: Search-first shell** | S1–S6, S8, S14, S15; location bar moved into panes; search off the main thread | Alex can launch the app, type, and get results with no clicks |
 | **M2: Search polish** | S7, S9–S13 | Filters and history usable without knowing the syntax |
-| **M3: File manager parity** | F3–F6, F8 | Alex sets Chimera as the default file manager for a week |
+| **M3: File manager parity** | F3–F6, F8 | Alex sets Kestrel as the default file manager for a week |
 | **M4: Hardening** | D6, D9, query P1s, accessibility pass | No known permission leaks; keyboard-only run-through passes |
 
 ---
 
 ## 10. Success metrics
-- Alex uses Chimera instead of Nautilus for 2 weeks straight.
+- Alex uses Kestrel instead of Nautilus for 2 weeks straight.
 - Median time from launch to opening the file you were looking for is under 3 seconds.
 - Zero results that should have been hidden, found by an automated multi-user test.
 - `smoke-live.sh` and the full test suite pass on every release.
@@ -237,8 +237,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 1. **Search box placement:** centred in the header (as drawn), or a full-width bar under the header like Everything's own window?
 2. **Default scope:** should a new search default to *Everywhere* (Everything-style) or *This folder* (Files/Nautilus-style)?
 3. **Opening a result:** when you open a folder from the results, should it replace the search in that tab, or open a new tab and keep the results?
-4. **Default file manager:** should Chimera take over `inode/directory` on install, or stay opt-in?
-5. **Name:** keep "Chimera", or rename before 1.0?
+4. **Default file manager:** should Kestrel take over `inode/directory` on install, or stay opt-in?
+5. **Name:** keep "Kestrel", or rename before 1.0?
 6. **Other users:** is this machine single-user in practice? If so, D6 (ACLs) can drop to P2.
 - **M2 DONE (v0.3.0, 2026-10-25):** S7 (type in list → search box), S9 filter chips (Type/Date/Size, kept in sync
   with the query text both ways, Clear filters), S10 bold match highlighting in names, S11 autocomplete for
@@ -247,12 +247,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Esc clears a search from the file list / filter bar too. All verified with real clicks/keys.
 - **Startup fix (v0.4.0):** daemon opens its socket immediately and answers `indexing` until the first scan lands;
   the app shows "Indexing your files…" and retries every 1.5 s (verified: results appeared by themselves after the
-  42 s scan). `cx` prints "Still indexing".
+  42 s scan). `ks` prints "Still indexing".
 - **M3 DONE except drag-and-drop verification (v0.4.0, 2026-10-25):** F3 conflict dialog (Replace / Keep Both /
   Skip; replaced items go to the trash and Undo restores them — click-tested), F4 rename in place (popover on the
   row/tile, stem preselected — click-tested), F5 drops onto folder rows/tiles and sidebar places/bookmarks/drives,
   Trash row trashes (NOT verifiable headlessly: Broadway has no DnD — needs a manual check on Wayland),
-  F8 FileManager1 D-Bus service (`chimera --filemanager1`; ShowItems tested over D-Bus) + "Default File Manager"
+  F8 FileManager1 D-Bus service (`kestrel --filemanager1`; ShowItems tested over D-Bus) + "Default File Manager"
   menu toggle (user-level service file + `xdg-mime`; not exercised to avoid changing Alex's defaults).
   Also fixed: file shortcuts (Ctrl+C/V, Delete, F2…) and type-to-search died after navigating, because focus fell
   to the window; both now live on the window in the bubble phase.
@@ -260,14 +260,14 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 - **M4 built (v0.5.0, 2026-10-25):** D6 ACL-aware permission filter (dir ACLs at scan time, file ACLs before
   `content:` reads; end-to-end deny test), D9 drives indexed on mount / dropped on unmount (watch loop polls
   /proc/self/mounts; mount fds no longer held open, so unmount isn't blocked), query P1s `dc:` `da:` `len:`,
-  Unicode lowercasing (é/É), `<…>` grouping incl. `!<…>`; `cx --scope DIR --count`; accessibility: icon buttons
+  Unicode lowercasing (é/É), `<…>` grouping incl. `!<…>`; `ks --scope DIR --count`; accessibility: icon buttons
   named from tooltips, labelled search/scope/location fields, F6/Shift+F6 region cycling, keyboard-only run-through.
   D9 needs root to verify: `scripts/smoke-live.sh` now mounts/unmounts a loop-ext4 "drive".
 - **v0.5.1 (2026-10-25):** v0.5.0 broke live updates (O_PATH mount fd rejected by open_by_handle_at); fixed.
   **M4 verified:** `smoke-live.sh` 13/13 as root — live create/rename/modify/new-tree/delete, /root privacy,
   Timeshift + Docker excluded, drive indexed on mount, unmounts cleanly (not held busy), dropped on unmount.
   All milestones M0–M4 done.
-- **v0.6.0 (2026-10-25): D7 + scan memory.** Snapshot at /var/lib/chimera/index.bin (0600, StateDirectory 0700),
+- **v0.6.0 (2026-10-25): D7 + scan memory.** Snapshot at /var/lib/kestrel/index.bin (0600, StateDirectory 0700),
   saved on SIGTERM/shutdown and every 10 min if changed; loaded at start in ~0.25 s so search works immediately
   while a background rescan catches offline changes; damaged/other-version snapshots are rejected (validated
   links/offsets). jwalk replaced by a worker-pool walker that never waits on tree order: scan peak 959 MB → 294 MB
@@ -275,15 +275,15 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Smoke test uses its own snapshot path so it can't touch the service's.
 - **v0.6.0 verified (2026-10-25):** smoke-live 13/13 as root (root scan now 10–20 s); on restart the service saved
   the snapshot (0.4 s), the new one loaded it (0.24 s) and served immediately, then rescanned (20.5 s);
-  /var/lib/chimera unreadable to Alex as intended. Steady RSS ~263 MB.
+  /var/lib/kestrel unreadable to Alex as intended. Steady RSS ~263 MB.
 - **v0.6.1:** fixed search box eating the space and jumping the cursor to the start (window re-synced the trimmed
   query into the box mid-typing). **v0.7.0:** Preferences (☰ → Preferences, Ctrl+,): style, default view,
   hidden files, reopen tabs, default scope, type-to-search, default file manager, index status, excluded folders
-  (D4 — applied via pkexec + service restart), Rebuild Index. Settings in ~/.config/chimera/settings.json.
+  (D4 — applied via pkexec + service restart), Rebuild Index. Settings in ~/.config/kestrel/settings.json.
   Apply/Rebuild need Alex's password, so not click-tested.
 - **v0.7.1:** events that can't be resolved (not ESTALE; e.g. ENOMEM seen once during a cargo build) now schedule
   a repair rescan, rate-limited to one per 10 min, instead of being silently dropped. Smoke test checks it end to
-  end via test-only env hooks (CHIMERA_TEST_LOSE, CHIMERA_LOST_GAP_SECS).
+  end via test-only env hooks (KESTREL_TEST_LOSE, KESTREL_LOST_GAP_SECS).
 - **v0.7.2 (2026-10-25): "crash on clicking Trash".** Not a crash: the window froze 20–60 s on synchronous GVfs calls
   (folder title lookup on the main thread) because trash:/// checks every mount and the TV box's CIFS mount
   (/mnt/tvbox) was down ("Host is down" after 20 s); GNOME showed it as not responding. Fixes: folder titles never
@@ -293,3 +293,24 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 - **v0.7.2 installed (2026-10-25):** smoke-live 15/15 as root incl. lost-event repair; service restarted on the
   snapshot path.
 
+- **v0.8.0 (2026-10-25): bundled 7-Zip + document previews.** Ubuntu's 7zip (26.00) carries none of 2026's
+  decoder CVE fixes (incl. CVE-2026-14266 XZ heap overflow) and has no RAR codec, so the .deb now ships the official
+  static 7zz 26.05 at /usr/lib/kestrel/7zz (+ License.txt; fetched and digest-checked against the GitHub release by
+  `scripts/update-7zip.sh VERSION`; re-run monthly). Every extraction (7zz and tar) runs under bubblewrap: no network,
+  read-only system, home/tmp/run/media hidden, only the archive and the temp output folder visible. Encrypted
+  archives prompt for a password (sent over stdin); 7-Zip progress drives the header bar. Preview pane renders the
+  first 20 pages of PDFs (pdftoppm) and Word/Excel/PowerPoint/ODF/RTF (LibreOffice → PDF), both in the same sandbox,
+  cached in ~/.cache/kestrel/preview; Markdown renders formatted. Depends: bubblewrap (7zip dropped); Recommends:
+  poppler-utils, libreoffice-writer/-calc/-impress. Not done: cancel button, per-file extract conflicts, archive
+  listing in preview.
+- **v0.9.0 (2026-10-25): renamed Chimera → Kestrel.** Binaries kestrel / kestrel-indexd / ks (was cx), app id
+  dev.kestrel.Kestrel, /run/kestrel, /var/lib/kestrel, /etc/kestrel, ~/.config/kestrel, env KESTREL_*. The .deb
+  Conflicts/Replaces chimera; postinst deletes the old root-owned /var/lib/chimera snapshot. First launch moves
+  ~/.config/chimera over and re-points the default-file-manager hookup (D-Bus service + xdg-mime). Kept on purpose:
+  the `user.chimera.tags` xattr, so existing colour tags survive.
+- **v0.9.1 (2026-10-25):** sidebar toggle moved to the window's top-left corner (sidebar header; shown in the content
+  header only while the sidebar is hidden), and F9 now actually toggles it (the tooltip promised it; never bound).
+  New preview-pane toggle mirrors it top-right (Alt+P). smoke-live.sh refuses to run under sudo: Alex's 0.9.0 run
+  reported "no /root for you" as FAIL only because the user-side queries ran as root.
+- **v0.9.1 installed (2026-10-25):** smoke-live 15/15 as Alex (after the script learned to clear a root-owned stale
+  log/socket left by a sudo run, which had made it test against a daemon that never started).

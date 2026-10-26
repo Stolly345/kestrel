@@ -1,0 +1,1598 @@
+//! One tab: a folder (any GIO location) with an optional search layered on top.
+//!
+//! The folder listing stays loaded while searching, with its own selection and scroll position,
+//! so clearing the search returns exactly where you were.
+
+use crate::fileops::Ops;
+use crate::search::{SearchError, SearchModel};
+use adw::prelude::*;
+use kestrel_index::Sort;
+use gtk::{gdk, gio, glib, graphene};
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+pub const ATTRS: &str = "standard::*,time::modified,unix::mode,owner::user,xattr::*,thumbnail::path,thumbnail::is-valid,id::filesystem";
+
+/// What a tab is told to show (CLI, session, sidebar).
+#[derive(Clone, Debug)]
+pub enum Loc {
+    Dir(gio::File),
+    Search(String),
+}
+
+impl Loc {
+    /// Session/CLI form: a URI, or `search:<query>`.
+    pub fn to_token(&self) -> String {
+        match self {
+            Loc::Dir(f) => f.uri().to_string(),
+            Loc::Search(q) => format!("search:{q}"),
+        }
+    }
+
+    pub fn from_token(t: &str) -> Loc {
+        match t.strip_prefix("search:") {
+            Some(q) => Loc::Search(q.into()),
+            None => Loc::Dir(gio::File::for_commandline_arg(t)),
+        }
+    }
+}
+
+/// A folder's title, worked out from its path/URI alone: never touches the disk or GVfs. A query
+/// here ran on the main thread and froze the window for 20+ s on a dead network mount (and on
+/// trash:///, whose backend checks every mount for a .Trash folder).
+pub fn dir_title(f: &gio::File) -> String {
+    match f.path() {
+        Some(p) if p == glib::home_dir() => "Home".into(),
+        Some(p) if p.as_os_str() == "/" => "File System".into(),
+        Some(p) => glib::filename_display_basename(&p).to_string(),
+        None => match (f.uri_scheme().as_deref(), f.basename()) {
+            (Some("trash"), _) if f.parent().is_none() => "Trash".into(),
+            (Some("recent"), _) => "Recent".into(),
+            (Some("network"), _) => "Network".into(),
+            (Some("computer"), _) => "Computer".into(),
+            (_, Some(b)) if b.as_os_str() != "/" => b.to_string_lossy().into_owned(),
+            _ => f.uri().to_string(),
+        },
+    }
+}
+
+/// What a search covers. Folder scopes become an `under:`/`parent:` term on the folder the tab is in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Scope {
+    #[default]
+    Everywhere,
+    Folder,
+    FolderOnly,
+}
+
+impl Scope {
+    pub const ALL: [Scope; 3] = [Scope::Everywhere, Scope::Folder, Scope::FolderOnly];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Scope::Everywhere => "Everywhere",
+            Scope::Folder => "This folder",
+            Scope::FolderOnly => "This folder only",
+        }
+    }
+
+    /// The extra query term, or None (Everywhere, or a folder the index can't see).
+    fn term(self, dir: &gio::File) -> Option<String> {
+        let p = dir.path()?;
+        let p = p.display();
+        match self {
+            Scope::Everywhere => None,
+            Scope::Folder => Some(format!("\"under:{p}\"")),
+            Scope::FolderOnly => Some(format!("\"parent:{p}\"")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    List,
+    Grid,
+    Columns,
+}
+
+impl Mode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::List => "list",
+            Mode::Grid => "grid",
+            Mode::Columns => "columns",
+        }
+    }
+    pub fn parse(s: &str) -> Mode {
+        match s {
+            "grid" => Mode::Grid,
+            "columns" => Mode::Columns,
+            _ => Mode::List,
+        }
+    }
+}
+
+pub fn info_file(info: &gio::FileInfo) -> Option<gio::File> {
+    info.attribute_object("standard::file").and_downcast()
+}
+
+fn is_dirlike(info: &gio::FileInfo) -> bool {
+    matches!(info.file_type(), gio::FileType::Directory | gio::FileType::Mountable | gio::FileType::Shortcut)
+}
+
+/// Where activating this entry should go: shortcuts/mountables (network://, computer://) carry a target.
+fn nav_target(info: &gio::FileInfo) -> Option<gio::File> {
+    match info.attribute_string("standard::target-uri") {
+        Some(t) => Some(gio::File::for_uri(&t)),
+        None => info_file(info),
+    }
+}
+
+fn info_of(o: &glib::Object) -> &gio::FileInfo {
+    o.downcast_ref::<gio::FileInfo>().unwrap()
+}
+
+fn cmp<T: Ord>(a: T, b: T) -> gtk::Ordering {
+    a.cmp(&b).into()
+}
+
+fn mtime(i: &gio::FileInfo) -> i64 {
+    i.modification_date_time().map_or(0, |d| d.to_unix())
+}
+
+pub fn fmt_date(i: &gio::FileInfo) -> String {
+    i.modification_date_time()
+        .filter(|d| d.to_unix() != 0)
+        .and_then(|d| d.to_local().ok())
+        .and_then(|d| d.format("%Y-%m-%d %H:%M").ok())
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+/// 1234567 -> "1,234,567"
+pub fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Text typed into a location bar: a path, `~/…`, or a URI. Nonexistent paths are None.
+pub fn as_location(t: &str) -> Option<gio::File> {
+    let t = t.trim();
+    let f = if t == "~" || t.starts_with("~/") {
+        gio::File::for_path(glib::home_dir().join(t[1..].trim_start_matches('/')))
+    } else if t.starts_with('/') {
+        gio::File::for_path(t)
+    } else if t.contains(':') {
+        return Some(gio::File::for_uri(t));
+    } else {
+        return None;
+    };
+    match f.query_file_type(gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE) {
+        gio::FileType::Unknown => None,
+        gio::FileType::Directory => Some(f),
+        _ => f.parent(),
+    }
+}
+
+type PendingSelect = (Vec<String>, Box<dyn FnOnce()>);
+
+/// Result of the last search, for the status bar.
+#[derive(Clone)]
+enum SearchState {
+    Running,
+    Done(crate::search::Outcome),
+    BadQuery(String),
+    Down(String),
+    Indexing,
+}
+
+pub struct Browser {
+    pub root: gtk::Box,
+    stack: gtk::Stack,
+    list: gtk::ColumnView,
+    grid: gtk::GridView,
+    list_scroll: gtk::ScrolledWindow,
+    grid_scroll: gtk::ScrolledWindow,
+    miller: gtk::Box,
+    miller_scroll: gtk::ScrolledWindow,
+    miller_sel: RefCell<Option<gio::File>>,
+    status: adw::StatusPage,
+    statusbar: gtk::Label,
+    // location bar
+    loc_stack: gtk::Stack,
+    crumbs: gtk::Box,
+    loc_label: gtk::Label,
+    loc_entry: gtk::Entry,
+    dirlist: gtk::DirectoryList,
+    filter: gtk::CustomFilter,
+    search: SearchModel,
+    dir_sel: gtk::MultiSelection,
+    search_sel: gtk::MultiSelection,
+    item_menu: gtk::PopoverMenu,
+    bg_menu: gtk::PopoverMenu,
+    dir_col: gtk::ColumnViewColumn,
+    git_col: gtk::ColumnViewColumn,
+    git: RefCell<Option<Rc<crate::git::GitInfo>>>,
+    git_pending: Cell<bool>,
+    /// (position, view) -> the ListItem showing it, to anchor the rename popup.
+    rows: RefCell<std::collections::HashMap<(u32, u8), glib::WeakRef<gtk::ListItem>>>,
+    pending_select: RefCell<Option<PendingSelect>>,
+    cols: Vec<(gtk::ColumnViewColumn, Sort)>,
+    dir: RefCell<gio::File>,
+    back: RefCell<Vec<gio::File>>,
+    fwd: RefCell<Vec<gio::File>>,
+    /// The user's search text while a search is showing.
+    query: RefCell<Option<String>>,
+    /// Words of the query to bold in result names.
+    hl: Rc<RefCell<Vec<String>>>,
+    scope: Cell<Scope>,
+    search_state: RefCell<SearchState>,
+    /// Folder view scroll positions (list, grid), restored when a search is cleared.
+    saved_scroll: Cell<(f64, f64)>,
+    show_hidden: Rc<Cell<bool>>,
+    mode: Cell<Mode>,
+    pub page: RefCell<Option<adw::TabPage>>,
+    /// Window hooks: header refresh, selection changes (preview pane), daemon reachable or not.
+    pub on_change: RefCell<Option<Rc<dyn Fn()>>>,
+    pub on_select: RefCell<Option<Rc<dyn Fn()>>>,
+    pub on_daemon: RefCell<Option<Rc<dyn Fn(bool)>>>,
+    ops: Rc<Ops>,
+    me: Weak<Browser>,
+}
+
+/// Right-click and drag-out on one row/tile. `item` is that row's ListItem.
+fn row_gestures(w: &gtk::Widget, item: &gtk::ListItem, b: &Weak<Browser>) {
+    let g = gtk::GestureClick::builder().button(3).build();
+    let (bw, iw) = (b.clone(), item.downgrade());
+    g.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        let (Some(b), Some(it)) = (bw.upgrade(), iw.upgrade()) else { return };
+        let pos = it.position();
+        if !b.sel().is_selected(pos) {
+            b.sel().select_item(pos, true);
+        }
+        b.popup(&b.item_menu, &g.widget().unwrap(), x, y);
+    });
+    w.add_controller(g);
+
+    let ds = gtk::DragSource::builder().actions(gdk::DragAction::COPY | gdk::DragAction::MOVE).build();
+    let (bw, iw) = (b.clone(), item.downgrade());
+    ds.connect_prepare(move |_, _, _| {
+        let (b, it) = (bw.upgrade()?, iw.upgrade()?);
+        let pos = it.position();
+        if !b.sel().is_selected(pos) {
+            b.sel().select_item(pos, true);
+        }
+        Some(gdk::ContentProvider::for_value(&gdk::FileList::from_array(&b.selected_files()).to_value()))
+    });
+    w.add_controller(ds);
+}
+
+/// Drop files onto a folder row/tile: into that folder. Other rows decline, so the drop falls
+/// through to the view (the folder being shown).
+fn folder_drop_target(w: &gtk::Widget, item: &gtk::ListItem, b: &Weak<Browser>) {
+    let dt = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY | gdk::DragAction::MOVE);
+    let iw = item.downgrade();
+    dt.connect_accept(move |_, _| {
+        iw.upgrade()
+            .and_then(|it| it.item())
+            .and_downcast::<gio::FileInfo>()
+            .is_some_and(|i| is_dirlike(&i))
+    });
+    let (bw, iw) = (b.clone(), item.downgrade());
+    dt.connect_drop(move |t, v, _, _| {
+        let (Some(b), Some(it), Ok(list)) = (bw.upgrade(), iw.upgrade(), v.get::<gdk::FileList>()) else {
+            return false;
+        };
+        let Some(dest) = it.item().and_downcast::<gio::FileInfo>().and_then(|i| nav_target(&i)) else {
+            return false;
+        };
+        let files = list.files();
+        let actions = t.current_drop().map(|d| d.actions()).unwrap_or(gdk::DragAction::empty());
+        b.ops.transfer(crate::fileops::drop_op(actions, &files, &dest), files, dest);
+        true
+    });
+    w.add_controller(dt);
+}
+
+/// `view`: Some(0) list names / Some(1) grid tiles get tracked (rename popup anchor) and accept
+/// folder drops; other columns don't.
+fn factory(
+    b: &Weak<Browser>,
+    view: Option<u8>,
+    setup: impl Fn() -> gtk::Widget + 'static,
+    bind: impl Fn(&gtk::Widget, &gio::FileInfo) + 'static,
+) -> gtk::SignalListItemFactory {
+    let f = gtk::SignalListItemFactory::new();
+    let bw = b.clone();
+    f.connect_setup(move |_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let w = setup();
+        row_gestures(&w, item, &bw);
+        if view.is_some() {
+            folder_drop_target(&w, item, &bw);
+        }
+        item.set_child(Some(&w));
+    });
+    let bw = b.clone();
+    f.connect_bind(move |_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        if let (Some(v), Some(b)) = (view, bw.upgrade()) {
+            b.rows.borrow_mut().insert((item.position(), v), item.downgrade());
+        }
+        if let (Some(w), Some(info)) = (item.child(), item.item().and_downcast::<gio::FileInfo>()) {
+            bind(&w, &info);
+        }
+    });
+    f
+}
+
+fn label_factory(b: &Weak<Browser>, xalign: f32, text: impl Fn(&gio::FileInfo) -> String + 'static) -> gtk::SignalListItemFactory {
+    factory(
+        b,
+        None,
+        move || {
+            gtk::Label::builder()
+                .xalign(xalign)
+                .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                .css_classes(["dim-label"])
+                .build()
+                .upcast()
+        },
+        move |w, info| w.downcast_ref::<gtk::Label>().unwrap().set_text(&text(info)),
+    )
+}
+
+/// Thumbnail if one is cached (ours or Nautilus'), else the type icon.
+pub fn set_icon(img: &gtk::Image, info: &gio::FileInfo) {
+    if info.boolean("thumbnail::is-valid")
+        && let Some(p) = info.attribute_byte_string("thumbnail::path")
+    {
+        img.set_from_file(Some(p.as_str()));
+        return;
+    }
+    match info.icon() {
+        Some(i) => img.set_from_gicon(&i),
+        None => img.set_icon_name(Some("text-x-generic")),
+    }
+}
+
+impl Browser {
+    pub fn new(ops: Rc<Ops>, item_model: &gio::MenuModel, bg_model: &gio::MenuModel, loc: Loc) -> Rc<Browser> {
+        let (dir, query) = match loc {
+            Loc::Dir(f) => (f, None),
+            Loc::Search(q) => (gio::File::for_path(glib::home_dir()), Some(q)),
+        };
+        let b = Rc::new_cyclic(|me: &Weak<Browser>| Browser::build(ops, item_model, bg_model, dir, me.clone()));
+        b.wire();
+        b.load_dir();
+        if let Some(q) = query {
+            b.set_search(&q);
+        }
+        b
+    }
+
+    fn build(ops: Rc<Ops>, item_model: &gio::MenuModel, bg_model: &gio::MenuModel, dir: gio::File, me: Weak<Browser>) -> Browser {
+        let show_hidden = Rc::new(Cell::new(false));
+        let dirlist = gtk::DirectoryList::new(Some(ATTRS), None::<&gio::File>);
+        let sh = show_hidden.clone();
+        let filter = gtk::CustomFilter::new(move |o| sh.get() || !info_of(o).is_hidden());
+        let filtered = gtk::FilterListModel::new(Some(dirlist.clone()), Some(filter.clone()));
+        let sorted = gtk::SortListModel::new(Some(filtered), None::<gtk::Sorter>);
+        let dir_sel = gtk::MultiSelection::new(Some(sorted.clone()));
+        let search = SearchModel::default();
+        let search_sel = gtk::MultiSelection::new(Some(search.clone()));
+
+        let hl: Rc<RefCell<Vec<String>>> = Rc::default();
+        let hl2 = hl.clone();
+        // details view
+        let list = gtk::ColumnView::builder().model(&dir_sel).enable_rubberband(true).reorderable(true).build();
+        list.add_css_class("data-table");
+        let name_f = factory(
+            &me,
+            Some(0),
+            || {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                row.append(&gtk::Image::builder().pixel_size(16).build());
+                row.append(
+                    &gtk::Label::builder()
+                        .xalign(0.0)
+                        .hexpand(true)
+                        .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                        .build(),
+                );
+                row.append(&gtk::Box::builder().spacing(3).build());
+                row.upcast()
+            },
+            move |w, info| {
+                let img = w.first_child().and_downcast::<gtk::Image>().unwrap();
+                set_icon(&img, info);
+                img.set_pixel_size(16);
+                let label = img.next_sibling().and_downcast::<gtk::Label>().unwrap();
+                // hl is only non-empty for search results (folder views never set it)
+                let terms = hl2.borrow();
+                if terms.is_empty() || info.attribute_string("kestrel::dir").is_none() {
+                    label.set_text(&info.display_name());
+                } else {
+                    label.set_markup(&crate::query_ui::highlight_markup(&info.display_name(), &terms));
+                }
+                crate::tags::fill_dots(&w.last_child().and_downcast::<gtk::Box>().unwrap(), crate::tags::of_info(info));
+            },
+        );
+        let col = |title: &str, f: gtk::SignalListItemFactory, sorter: gtk::CustomSorter, width: i32| {
+            let c = gtk::ColumnViewColumn::builder()
+                .title(title)
+                .factory(&f)
+                .sorter(&sorter)
+                .resizable(true)
+                .build();
+            // Name/Folder: a floor width, then take the rest; narrow panes scroll sideways instead of squashing names
+            c.set_fixed_width(if width > 0 { width } else { 220 });
+            c.set_expand(width <= 0);
+            c
+        };
+        let name_col = col(
+            "Name",
+            name_f,
+            gtk::CustomSorter::new(|a, b| cmp(info_of(a).display_name().to_lowercase(), info_of(b).display_name().to_lowercase())),
+            0,
+        );
+        let dir_col = col(
+            "Folder",
+            label_factory(&me, 0.0, |i| i.attribute_string("kestrel::dir").map(|s| s.to_string()).unwrap_or_default()),
+            gtk::CustomSorter::new(|a, b| cmp(info_of(a).attribute_string("kestrel::dir"), info_of(b).attribute_string("kestrel::dir"))),
+            0,
+        );
+        dir_col.set_visible(false);
+        let size_col = col(
+            "Size",
+            label_factory(&me, 1.0, |i| {
+                if is_dirlike(i) {
+                    String::new()
+                } else {
+                    glib::format_size(i.size() as u64).to_string()
+                }
+            }),
+            gtk::CustomSorter::new(|a, b| cmp(info_of(a).size(), info_of(b).size())),
+            90,
+        );
+        let date_col = col(
+            "Modified",
+            label_factory(&me, 0.0, fmt_date),
+            gtk::CustomSorter::new(|a, b| cmp(mtime(info_of(a)), mtime(info_of(b)))),
+            140,
+        );
+        let type_col = col(
+            "Type",
+            label_factory(&me, 0.0, |i| {
+                i.content_type().map(|c| gio::content_type_get_description(&c).to_string()).unwrap_or_default()
+            }),
+            gtk::CustomSorter::new(|a, b| cmp(info_of(a).content_type(), info_of(b).content_type())),
+            130,
+        );
+        let gw = me.clone();
+        let git_col = gtk::ColumnViewColumn::builder()
+            .title("Git")
+            .fixed_width(48)
+            .visible(false)
+            .factory(&factory(
+                &me,
+                None,
+                || gtk::Label::builder().css_classes(["monospace", "heading"]).build().upcast(),
+                move |w, info| {
+                    let l = w.downcast_ref::<gtk::Label>().unwrap();
+                    let st = gw.upgrade().and_then(|b| info_file(info).and_then(|f| b.git_status(&f)));
+                    l.set_text(&st.map(String::from).unwrap_or_default());
+                    l.set_css_classes(&[
+                        "monospace",
+                        "heading",
+                        match st {
+                            Some('M' | 'R') => "warning",
+                            Some('A' | '?') => "success",
+                            Some('D' | 'U') => "error",
+                            _ => "dim-label",
+                        },
+                    ]);
+                },
+            ))
+            .build();
+        for c in [&name_col, &git_col, &dir_col, &size_col, &date_col, &type_col] {
+            list.append_column(c);
+        }
+        list.sort_by_column(Some(&name_col), gtk::SortType::Ascending);
+        let dirs_first = gtk::CustomSorter::new(|a, b| cmp(!is_dirlike(info_of(a)), !is_dirlike(info_of(b))));
+        let multi = gtk::MultiSorter::new();
+        multi.append(dirs_first);
+        if let Some(s) = list.sorter() {
+            multi.append(s);
+        }
+        sorted.set_sorter(Some(&multi));
+
+        // grid view
+        let tile_f = factory(
+            &me,
+            Some(1),
+            || {
+                let t = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).width_request(96).build();
+                t.append(&gtk::Image::builder().pixel_size(64).build());
+                t.append(
+                    &gtk::Label::builder()
+                        .wrap(true)
+                        .wrap_mode(gtk::pango::WrapMode::WordChar)
+                        .lines(2)
+                        .ellipsize(gtk::pango::EllipsizeMode::End)
+                        .justify(gtk::Justification::Center)
+                        .max_width_chars(14)
+                        .build(),
+                );
+                t.upcast()
+            },
+            |w, info| {
+                let img = w.first_child().and_downcast::<gtk::Image>().unwrap();
+                img.set_widget_name("");
+                set_icon(&img, info);
+                img.set_pixel_size(64);
+                crate::thumbs::load_into(&img, info);
+                w.last_child().and_downcast::<gtk::Label>().unwrap().set_text(&info.display_name());
+            },
+        );
+        let grid = gtk::GridView::builder()
+            .model(&dir_sel)
+            .factory(&tile_f)
+            .enable_rubberband(true)
+            .max_columns(64)
+            .build();
+
+        let miller = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let miller_scroll = gtk::ScrolledWindow::builder().child(&miller).vscrollbar_policy(gtk::PolicyType::Never).build();
+        let status = adw::StatusPage::new();
+
+        let list_scroll = gtk::ScrolledWindow::builder().child(&list).vexpand(true).build();
+        let grid_scroll = gtk::ScrolledWindow::builder().child(&grid).vexpand(true).build();
+        let stack = gtk::Stack::new();
+        stack.add_named(&list_scroll, Some("list"));
+        stack.add_named(&grid_scroll, Some("grid"));
+        stack.add_named(&miller_scroll, Some("columns"));
+        stack.add_named(&status, Some("status"));
+
+        // location bar: breadcrumbs, or an editable path (Ctrl+L)
+        let loc_label = gtk::Label::builder()
+            .css_classes(["dim-label", "search-scope"])
+            .visible(false)
+            .margin_start(6)
+            .build();
+        let crumbs = gtk::Box::builder().spacing(0).build();
+        let crumb_scroll = gtk::ScrolledWindow::builder()
+            .child(&crumbs)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .propagate_natural_height(true)
+            .build();
+        let crumb_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        crumb_row.append(&loc_label);
+        crumb_row.append(&crumb_scroll);
+        let loc_entry = gtk::Entry::builder()
+            .placeholder_text("Type a path or address, e.g. ~/Projects or sftp://host/")
+            .hexpand(true)
+            .build();
+        loc_entry.update_property(&[gtk::accessible::Property::Label("Location")]);
+        let loc_stack = gtk::Stack::builder().css_classes(["location-bar"]).build();
+        loc_stack.add_named(&crumb_row, Some("crumbs"));
+        loc_stack.add_named(&loc_entry, Some("edit"));
+
+        let statusbar = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .css_classes(["dim-label", "caption", "statusbar"])
+            .margin_start(8)
+            .margin_end(8)
+            .margin_top(2)
+            .margin_bottom(2)
+            .build();
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.append(&loc_stack);
+        root.append(&stack);
+        root.append(&statusbar);
+
+        let menu = |m: &gio::MenuModel| {
+            let p = gtk::PopoverMenu::from_model(Some(m));
+            p.set_parent(&root);
+            p.set_has_arrow(false);
+            p.set_halign(gtk::Align::Start);
+            p
+        };
+        let (item_menu, bg_menu) = (menu(item_model), menu(bg_model));
+        let cols = vec![
+            (name_col, Sort::Name),
+            (dir_col.clone(), Sort::Path),
+            (size_col, Sort::Size),
+            (date_col, Sort::Mtime),
+            (type_col, Sort::Ext),
+        ];
+
+        Browser {
+            root,
+            stack,
+            list,
+            grid,
+            list_scroll,
+            grid_scroll,
+            miller,
+            miller_scroll,
+            miller_sel: RefCell::default(),
+            status,
+            statusbar,
+            loc_stack,
+            crumbs,
+            loc_label,
+            loc_entry,
+            dirlist,
+            filter,
+            search,
+            dir_sel,
+            search_sel,
+            item_menu,
+            bg_menu,
+            dir_col,
+            git_col,
+            git: RefCell::default(),
+            git_pending: Cell::new(false),
+            rows: RefCell::default(),
+            pending_select: RefCell::default(),
+            cols,
+            dir: RefCell::new(dir),
+            back: RefCell::default(),
+            fwd: RefCell::default(),
+            query: RefCell::default(),
+            hl,
+            scope: Cell::new(Scope::Everywhere),
+            search_state: RefCell::new(SearchState::Running),
+            saved_scroll: Cell::new((0.0, 0.0)),
+            show_hidden,
+            mode: Cell::new(Mode::List),
+            page: RefCell::default(),
+            on_change: RefCell::default(),
+            on_select: RefCell::default(),
+            on_daemon: RefCell::default(),
+            ops,
+            me,
+        }
+    }
+
+    /// Signal handlers that need `self`.
+    fn wire(self: &Rc<Self>) {
+        let me = self.me.clone();
+        let (im, bm) = (self.item_menu.clone(), self.bg_menu.clone());
+        self.root.connect_destroy(move |_| {
+            im.unparent();
+            bm.unparent();
+        });
+
+        let w = me.clone();
+        self.list.connect_activate(move |_, pos| w.upgrade().into_iter().for_each(|b| b.activate(pos)));
+        let w = me.clone();
+        self.grid.connect_activate(move |_, pos| w.upgrade().into_iter().for_each(|b| b.activate(pos)));
+
+        // search results are sorted by the daemon: re-query when a column header is clicked
+        if let Some(s) = self.list.sorter() {
+            let w = me.clone();
+            s.connect_changed(move |_, _| {
+                if let Some(b) = w.upgrade()
+                    && b.is_searching()
+                {
+                    b.run_search();
+                }
+            });
+        }
+
+        for sel in [&self.dir_sel, &self.search_sel] {
+            let w = me.clone();
+            sel.connect_selection_changed(move |_, _, _| {
+                if let Some(b) = w.upgrade() {
+                    b.update_status();
+                    b.notify_select();
+                }
+            });
+            let w = me.clone();
+            sel.connect_items_changed(move |_, _, _, _| w.upgrade().into_iter().for_each(|b| b.update_status()));
+        }
+
+        // files appearing/changing in a repo: re-run git status, at most twice a second
+        let w = me.clone();
+        self.dirlist.connect_items_changed(move |dl, _, _, _| {
+            let Some(b) = w.upgrade() else { return };
+            if dl.is_loading() || b.git.borrow().is_none() || b.git_pending.replace(true) {
+                return;
+            }
+            let w = w.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+                if let Some(b) = w.upgrade() {
+                    b.git_pending.set(false);
+                    let d = b.dir.borrow().clone();
+                    b.refresh_git(&d);
+                }
+            });
+        });
+        let w = me.clone();
+        self.dirlist.connect_loading_notify(move |dl| {
+            let Some(b) = w.upgrade() else { return };
+            if dl.is_loading() || b.is_searching() {
+                return;
+            }
+            b.show_folder_state();
+        });
+
+        // empty-space right click
+        let g = gtk::GestureClick::builder().button(3).build();
+        let w = me.clone();
+        g.connect_pressed(move |g, _, x, y| {
+            let Some(b) = w.upgrade() else { return };
+            b.sel().unselect_all();
+            b.popup(&b.bg_menu, &g.widget().unwrap(), x, y);
+        });
+        self.stack.add_controller(g);
+
+        // drop files in: same filesystem moves, otherwise copies (Shift forces move, Ctrl copy)
+        let dt = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY | gdk::DragAction::MOVE);
+        let w = me.clone();
+        dt.connect_drop(move |t, v, _, _| {
+            let (Some(b), Ok(list)) = (w.upgrade(), v.get::<gdk::FileList>()) else {
+                return false;
+            };
+            let Some(dest) = b.dir() else { return false };
+            let files = list.files();
+            let actions = t.current_drop().map(|d| d.actions()).unwrap_or(gdk::DragAction::empty());
+            b.ops.transfer(crate::fileops::drop_op(actions, &files, &dest), files, dest);
+            true
+        });
+        self.stack.add_controller(dt);
+
+        // location bar: click the breadcrumb strip's empty space (or Ctrl+L) to type a path
+        let g = gtk::GestureClick::new();
+        let w = me.clone();
+        g.connect_released(move |_, _, _, _| w.upgrade().into_iter().for_each(|b| b.edit_location()));
+        self.crumbs.parent().unwrap().parent().unwrap().add_controller(g);
+        let w = me.clone();
+        self.loc_entry.connect_activate(move |e| {
+            let Some(b) = w.upgrade() else { return };
+            match as_location(&e.text()) {
+                Some(f) => {
+                    b.go(Loc::Dir(f));
+                    b.focus_view();
+                }
+                None => b.ops.toast("No such folder"),
+            }
+        });
+        let k = gtk::EventControllerKey::new();
+        let w = me.clone();
+        k.connect_key_pressed(move |_, key, _, _| {
+            if key != gdk::Key::Escape {
+                return glib::Propagation::Proceed;
+            }
+            if let Some(b) = w.upgrade() {
+                b.loc_stack.set_visible_child_name("crumbs");
+                b.focus_view();
+            }
+            glib::Propagation::Stop
+        });
+        self.loc_entry.add_controller(k);
+        let fc = gtk::EventControllerFocus::new();
+        let w = me.clone();
+        fc.connect_leave(move |_| w.upgrade().into_iter().for_each(|b| b.loc_stack.set_visible_child_name("crumbs")));
+        self.loc_entry.add_controller(fc);
+    }
+
+    fn popup(&self, menu: &gtk::PopoverMenu, w: &gtk::Widget, x: f64, y: f64) {
+        let p = w
+            .compute_point(&self.root, &graphene::Point::new(x as f32, y as f32))
+            .unwrap_or(graphene::Point::new(x as f32, y as f32));
+        menu.set_pointing_to(Some(&gdk::Rectangle::new(p.x() as i32, p.y() as i32, 1, 1)));
+        menu.popup();
+    }
+
+    /// Keyboard context menu: at the view's top-left area.
+    pub fn context_menu(&self) {
+        let menu = if self.selected_files().is_empty() { &self.bg_menu } else { &self.item_menu };
+        menu.set_pointing_to(Some(&gdk::Rectangle::new(48, 96, 1, 1)));
+        menu.popup();
+    }
+
+    /// The selection model on screen: search results or the folder.
+    pub fn sel(&self) -> &gtk::MultiSelection {
+        if self.is_searching() { &self.search_sel } else { &self.dir_sel }
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.query.borrow().is_some()
+    }
+
+    pub fn query(&self) -> Option<String> {
+        self.query.borrow().clone()
+    }
+
+    pub fn scope(&self) -> Scope {
+        self.scope.get()
+    }
+
+    /// What to restore this tab to (session).
+    pub fn loc(&self) -> Loc {
+        match self.query() {
+            Some(q) => Loc::Search(q),
+            None => Loc::Dir(self.dir.borrow().clone()),
+        }
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode.get()
+    }
+
+    /// The folder being shown; None while search results are showing.
+    pub fn dir(&self) -> Option<gio::File> {
+        (!self.is_searching()).then(|| self.dir.borrow().clone())
+    }
+
+    /// The folder this tab is in, searching or not (search scope, location bar).
+    pub fn base_dir(&self) -> gio::File {
+        self.dir.borrow().clone()
+    }
+
+    pub fn title(&self) -> String {
+        match self.query() {
+            Some(q) => format!("\u{201c}{q}\u{201d}"),
+            None => dir_title(&self.dir.borrow()),
+        }
+    }
+
+    pub fn can_back(&self) -> bool {
+        self.is_searching() || !self.back.borrow().is_empty()
+    }
+
+    pub fn can_forward(&self) -> bool {
+        !self.is_searching() && !self.fwd.borrow().is_empty()
+    }
+
+    pub fn selected_infos(&self) -> Vec<gio::FileInfo> {
+        if self.mode.get() == Mode::Columns && !self.is_searching() {
+            return self
+                .miller_sel
+                .borrow()
+                .iter()
+                .filter_map(|f| {
+                    f.query_info(ATTRS, gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
+                        .ok()
+                        .inspect(|i| i.set_attribute_object("standard::file", f))
+                })
+                .collect();
+        }
+        let sel = self.sel();
+        let bs = sel.selection();
+        (0..bs.size() as u32)
+            .filter_map(|i| sel.item(bs.nth(i)).and_downcast::<gio::FileInfo>())
+            .collect()
+    }
+
+    /// Select entries by display name (headless testing, `--select`).
+    pub fn select_names(&self, names: &[String]) {
+        let sel = self.sel();
+        sel.unselect_all();
+        for i in 0..sel.n_items() {
+            if let Some(info) = sel.item(i).and_downcast::<gio::FileInfo>()
+                && names.iter().any(|n| *n == info.display_name())
+            {
+                sel.select_item(i, false);
+            }
+        }
+    }
+
+    /// F2: rename in a popup on the file's own row/tile. False if that isn't on screen (columns view).
+    pub fn rename_inline(&self) -> bool {
+        let sel = self.sel();
+        let bs = sel.selection();
+        if bs.size() != 1 || (self.mode.get() == Mode::Columns && !self.is_searching()) {
+            return false;
+        }
+        let pos = bs.nth(0);
+        let view = if self.stack.visible_child_name().as_deref() == Some("grid") { 1 } else { 0 };
+        if view == 0 {
+            self.list.scroll_to(pos, None, gtk::ListScrollFlags::NONE, None);
+        } else {
+            self.grid.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+        }
+        let item = self.rows.borrow().get(&(pos, view)).and_then(|w| w.upgrade()).filter(|it| it.position() == pos);
+        let (Some(anchor), Some(file)) = (
+            item.and_then(|it| it.child()).filter(|c| c.is_mapped()),
+            self.selected_files().into_iter().next(),
+        ) else {
+            return false;
+        };
+        let old = file.basename().unwrap_or_default().to_string_lossy().into_owned();
+        let stem = old.rfind('.').filter(|&p| p > 0).unwrap_or(old.len());
+        let n = old[..stem].chars().count() as i32;
+        let entry = gtk::Entry::builder().text(&old).width_chars(28).build();
+        let pop = gtk::Popover::builder().child(&entry).position(gtk::PositionType::Bottom).build();
+        pop.set_parent(&anchor);
+        pop.connect_closed(|p| {
+            let p = p.clone();
+            glib::idle_add_local_once(move || p.unparent());
+        });
+        let (ops, p) = (self.ops.clone(), pop.clone());
+        entry.connect_activate(move |e| {
+            let name = e.text().trim().to_string();
+            p.popdown();
+            if !name.is_empty() && name != old && !name.contains('/') {
+                ops.rename_to(&file, &name);
+            }
+        });
+        pop.popup();
+        entry.grab_focus();
+        glib::idle_add_local_once(move || entry.select_region(0, n));
+        true
+    }
+
+    pub fn selected_files(&self) -> Vec<gio::File> {
+        self.selected_infos().iter().filter_map(info_file).collect()
+    }
+
+    // ── navigation ──
+
+    pub fn go(&self, loc: Loc) {
+        match loc {
+            Loc::Search(q) => self.set_search(&q),
+            Loc::Dir(f) => {
+                self.end_search(false);
+                let prev = self.dir.replace(f);
+                self.back.borrow_mut().push(prev);
+                self.fwd.borrow_mut().clear();
+                self.saved_scroll.set((0.0, 0.0));
+                self.load_dir();
+            }
+        }
+    }
+
+    /// Back leaves a search first (like Esc), then walks folder history.
+    pub fn back(&self) {
+        if self.is_searching() {
+            self.clear_search();
+            return;
+        }
+        let Some(f) = self.back.borrow_mut().pop() else { return };
+        let cur = self.dir.replace(f);
+        self.fwd.borrow_mut().push(cur);
+        self.load_dir();
+    }
+
+    pub fn forward(&self) {
+        let Some(f) = self.fwd.borrow_mut().pop() else { return };
+        let cur = self.dir.replace(f);
+        self.back.borrow_mut().push(cur);
+        self.load_dir();
+    }
+
+    pub fn up(&self) {
+        if self.is_searching() {
+            self.clear_search();
+            return;
+        }
+        let parent = self.dir.borrow().parent(); // borrow must end before go() replaces dir
+        if let Some(p) = parent {
+            self.go(Loc::Dir(p));
+        }
+    }
+
+    pub fn reload(&self) {
+        if self.is_searching() {
+            self.run_search();
+            return;
+        }
+        let f = self.dir.borrow().clone();
+        self.dirlist.set_file(None::<&gio::File>);
+        self.dirlist.set_file(Some(&f));
+        if self.mode.get() == Mode::Columns {
+            self.miller_reset(&f);
+        }
+    }
+
+    pub fn set_show_hidden(&self, on: bool) {
+        self.show_hidden.set(on);
+        self.filter.changed(gtk::FilterChange::Different);
+    }
+
+    pub fn set_mode(&self, m: Mode) {
+        if self.mode.replace(m) == m {
+            return;
+        }
+        if m == Mode::Columns && !self.is_searching() {
+            let d = self.dir.borrow().clone();
+            self.miller_reset(&d);
+        }
+        self.show_view();
+        self.changed();
+    }
+
+    pub fn focus_view(&self) {
+        let _ = match self.stack.visible_child_name().as_deref() {
+            Some("grid") => self.grid.grab_focus(),
+            Some("columns") => self.miller.first_child().is_some_and(|c| c.child_focus(gtk::DirectionType::TabForward)),
+            _ => self.list.grab_focus(),
+        };
+    }
+
+    /// Ctrl+L: the location bar becomes a path field.
+    pub fn edit_location(&self) {
+        let d = self.dir.borrow().clone();
+        self.loc_entry
+            .set_text(&d.path().map_or_else(|| d.uri().to_string(), |p| p.display().to_string()));
+        self.loc_stack.set_visible_child_name("edit");
+        self.loc_entry.grab_focus();
+        self.loc_entry.select_region(0, -1);
+    }
+
+    /// Showing the trash? It's read straight from ~/.local/share/Trash/files: going through GVfs's
+    /// trash:/// checks every mount for a .Trash folder, and one dead network mount made that take
+    /// 25 s per request (the window froze, which looked like a crash).
+    pub fn is_trash(&self) -> bool {
+        self.dir.borrow().uri() == "trash:///"
+    }
+
+    fn load_dir(&self) {
+        let f = self.dir.borrow().clone();
+        self.set_crumbs();
+        if self.is_trash() {
+            let files = crate::fileops::home_trash().join("files");
+            let _ = std::fs::create_dir_all(&files);
+            self.set_dir(&gio::File::for_path(files));
+        } else if f.is_native() {
+            self.set_dir(&f);
+        } else {
+            // GVfs locations (sftp://, smb://, archives) may need mounting first
+            let me = self.me.clone();
+            glib::spawn_future_local(async move {
+                let Some(b) = me.upgrade() else { return };
+                b.show_status("folder-remote-symbolic", "Connecting…", &f.uri());
+                if let Err(e) = f
+                    .query_info_future("standard::type", gio::FileQueryInfoFlags::NONE, glib::Priority::DEFAULT)
+                    .await
+                    && e.matches(gio::IOErrorEnum::NotMounted)
+                {
+                    let op = gtk::MountOperation::new(b.root.root().and_downcast::<gtk::Window>().as_ref());
+                    if let Err(e) = f.mount_enclosing_volume_future(gio::MountMountFlags::NONE, Some(&op)).await {
+                        b.show_status("dialog-error-symbolic", "Couldn't connect", e.message());
+                        return;
+                    }
+                }
+                b.set_dir(&f);
+            });
+        }
+        self.changed();
+    }
+
+    fn set_dir(&self, f: &gio::File) {
+        self.refresh_git(f);
+        self.dirlist.set_file(Some(f));
+        if self.mode.get() == Mode::Columns {
+            self.miller_reset(f);
+        }
+        if !self.dirlist.is_loading() {
+            self.show_folder_state();
+            return;
+        }
+        // slow folders (network mounts, the trash): say so after a moment instead of a blank view
+        let (me, want) = (self.me.clone(), f.clone());
+        glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+            if let Some(b) = me.upgrade()
+                && b.dirlist.is_loading()
+                && b.dirlist.file().is_some_and(|d| d.equal(&want))
+                && !b.is_searching()
+                && b.dir_sel.n_items() == 0
+            {
+                b.show_status(
+                    "content-loading-symbolic",
+                    "Loading…",
+                    "This location is slow to answer (a network drive, or the trash checking every drive).",
+                );
+            }
+        });
+    }
+
+    /// Select these names once the folder has loaded (FileManager1.ShowItems), then call `then`.
+    pub fn select_when_loaded(&self, names: Vec<String>, then: impl FnOnce() + 'static) {
+        *self.pending_select.borrow_mut() = Some((names, Box::new(then)));
+        if !self.dirlist.is_loading() && self.dirlist.file().is_some() {
+            self.apply_pending_select();
+        }
+    }
+
+    fn apply_pending_select(&self) {
+        let Some((names, then)) = self.pending_select.take() else { return };
+        self.select_names(&names);
+        let first = self.dir_sel.selection().minimum();
+        if first != u32::MAX {
+            self.list.scroll_to(first, None, gtk::ListScrollFlags::FOCUS, None);
+        }
+        then();
+    }
+
+    /// Folder view, or an empty/error page once loading has finished.
+    fn show_folder_state(&self) {
+        if !self.dirlist.is_loading() {
+            self.apply_pending_select();
+        }
+        if let Some(e) = self.dirlist.error() {
+            self.show_status("dialog-error-symbolic", "Can't open this folder", e.message());
+        } else if self.dir_sel.n_items() == 0 && !self.dirlist.is_loading() && self.mode.get() != Mode::Columns {
+            self.show_status("folder-symbolic", "Folder is empty", "");
+        } else {
+            self.show_view();
+        }
+    }
+
+    fn set_crumbs(&self) {
+        let c = &self.crumbs;
+        while let Some(w) = c.first_child() {
+            c.remove(&w);
+        }
+        // inside home, start the trail at Home instead of / › home › alex
+        let home = gio::File::for_path(glib::home_dir());
+        let mut chain = vec![self.dir.borrow().clone()];
+        while !chain.last().unwrap().equal(&home) {
+            match chain.last().unwrap().parent() {
+                Some(p) => chain.push(p),
+                None => break,
+            }
+        }
+        for (i, d) in chain.iter().rev().enumerate() {
+            if i > 0 {
+                c.append(&gtk::Label::builder().label("\u{203a}").css_classes(["dim-label"]).build());
+            }
+            let b = gtk::Button::builder().css_classes(["flat", "crumb"]).build();
+            match d.path() {
+                Some(p) if p.as_os_str() == "/" => b.set_icon_name("drive-harddisk-symbolic"),
+                _ if d.equal(&home) => b.set_icon_name("user-home-symbolic"),
+                _ => b.set_label(&dir_title(d)),
+            }
+            b.set_tooltip_text(Some(&d.path().map_or_else(|| d.uri().to_string(), |p| p.display().to_string())));
+            let (me, d) = (self.me.clone(), d.clone());
+            b.connect_clicked(move |_| {
+                if let Some(b) = me.upgrade() {
+                    b.go(Loc::Dir(d.clone()));
+                }
+            });
+            c.append(&b);
+        }
+        crate::label_icon_buttons(c.upcast_ref());
+        let sc = c.parent().and_then(|v| v.parent()).and_downcast::<gtk::ScrolledWindow>();
+        glib::idle_add_local_once(move || {
+            if let Some(sc) = sc {
+                let a = sc.hadjustment();
+                a.set_value(a.upper());
+            }
+        });
+    }
+
+    // ── search ──
+
+    /// Show results for `text` (empty clears the search). Called on every keystroke.
+    pub fn set_search(&self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            self.clear_search();
+            return;
+        }
+        if !self.is_searching() {
+            // park the folder view: remember where it was scrolled
+            self.saved_scroll
+                .set((self.list_scroll.vadjustment().value(), self.grid_scroll.vadjustment().value()));
+            self.list.set_model(Some(&self.search_sel));
+            self.grid.set_model(Some(&self.search_sel));
+            self.dir_col.set_visible(true);
+            self.git_col.set_visible(false);
+        }
+        *self.query.borrow_mut() = Some(text.to_string());
+        *self.hl.borrow_mut() = crate::query_ui::highlight_terms(text);
+        self.run_search();
+    }
+
+    pub fn set_scope(&self, s: Scope) {
+        if self.scope.replace(s) != s && self.is_searching() {
+            self.run_search();
+        }
+        self.update_locbar();
+    }
+
+    /// Esc: back to the folder exactly as it was.
+    pub fn clear_search(&self) {
+        self.end_search(true);
+        self.show_folder_state();
+        self.changed();
+    }
+
+    fn end_search(&self, restore_scroll: bool) {
+        if !self.is_searching() {
+            return;
+        }
+        *self.query.borrow_mut() = None;
+        self.search.cancel();
+        self.list.set_model(Some(&self.dir_sel));
+        self.grid.set_model(Some(&self.dir_sel));
+        self.dir_col.set_visible(false);
+        self.git_col.set_visible(self.git.borrow().is_some());
+        if restore_scroll {
+            let (l, g) = self.saved_scroll.get();
+            let (ls, gs) = (self.list_scroll.clone(), self.grid_scroll.clone());
+            glib::idle_add_local_once(move || {
+                ls.vadjustment().set_value(l);
+                gs.vadjustment().set_value(g);
+            });
+        }
+        self.update_locbar();
+        self.update_status();
+    }
+
+    /// The query the daemon sees: the user's text plus the scope term.
+    fn effective_query(&self) -> Option<String> {
+        let q = self.query()?;
+        Some(match self.scope.get().term(&self.dir.borrow()) {
+            Some(t) => format!("{q} {t}"),
+            None => q,
+        })
+    }
+
+    fn run_search(&self) {
+        let Some(q) = self.effective_query() else { return };
+        *self.search_state.borrow_mut() = SearchState::Running;
+        self.update_status();
+        self.update_locbar();
+        self.changed();
+        let (sort, desc) = self.sort_key();
+        let me = self.me.clone();
+        self.search.run(&q, sort, desc, move |r| {
+            let Some(b) = me.upgrade() else { return };
+            if !b.is_searching() {
+                return;
+            }
+            let daemon_ok = !matches!(r, Err(SearchError::Down(_)));
+            match r {
+                Ok(o) => {
+                    *b.search_state.borrow_mut() = SearchState::Done(o);
+                    if o.total == 0 {
+                        let hint = if b.scope.get() == Scope::Everywhere {
+                            "Try fewer words, or open the ? in the search box for syntax."
+                        } else {
+                            "Nothing here. Switch the scope to Everywhere to search the whole disk."
+                        };
+                        b.show_status("system-search-symbolic", "No results", hint);
+                    } else {
+                        b.show_view();
+                    }
+                }
+                // keep the last good results on screen; the status bar shows what's wrong
+                Err(SearchError::Query(e)) => *b.search_state.borrow_mut() = SearchState::BadQuery(e),
+                Err(SearchError::Indexing) => {
+                    b.show_status(
+                        "content-loading-symbolic",
+                        "Indexing your files…",
+                        "The search service just started and is reading your disks. Results will appear here on their own.",
+                    );
+                    *b.search_state.borrow_mut() = SearchState::Indexing;
+                    // try again shortly, unless the user has moved on
+                    let (me, q) = (b.me.clone(), b.query());
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                        if let Some(b) = me.upgrade()
+                            && b.query() == q
+                        {
+                            b.run_search();
+                        }
+                    });
+                }
+                Err(SearchError::Down(e)) => {
+                    b.show_status(
+                        "network-offline-symbolic",
+                        "Search service not running",
+                        "Start kestrel-indexd from the banner above, or run: sudo systemctl start kestrel-indexd",
+                    );
+                    *b.search_state.borrow_mut() = SearchState::Down(e);
+                }
+            }
+            b.update_status();
+            let cb = b.on_daemon.borrow().clone();
+            if let Some(cb) = cb {
+                cb(daemon_ok);
+            }
+        });
+    }
+
+    fn sort_key(&self) -> (Sort, bool) {
+        let Some(s) = self.list.sorter().and_downcast::<gtk::ColumnViewSorter>() else {
+            return (Sort::Name, false);
+        };
+        let key = s
+            .primary_sort_column()
+            .and_then(|c| self.cols.iter().find(|(k, _)| *k == c).map(|(_, s)| *s))
+            .unwrap_or(Sort::Name);
+        (key, s.primary_sort_order() == gtk::SortType::Descending)
+    }
+
+    fn update_locbar(&self) {
+        if !self.is_searching() {
+            self.loc_label.set_visible(false);
+            return;
+        }
+        self.loc_label.set_visible(true);
+        let local = self.dir.borrow().path().is_some();
+        self.loc_label.set_label(match self.scope.get() {
+            Scope::Everywhere => "Searching everywhere — started from",
+            _ if !local => "Searching everywhere (this location isn't indexed) — from",
+            Scope::Folder => "Searching in",
+            Scope::FolderOnly => "Searching only in",
+        });
+    }
+
+    fn show_view(&self) {
+        let m = if self.is_searching() && self.mode.get() == Mode::Columns {
+            Mode::List
+        } else {
+            self.mode.get()
+        };
+        self.stack.set_visible_child_name(m.name());
+    }
+
+    fn show_status(&self, icon: &str, title: &str, desc: &str) {
+        self.status.set_icon_name(Some(icon));
+        self.status.set_title(title);
+        self.status.set_description(Some(desc).filter(|d| !d.is_empty()));
+        self.stack.set_visible_child_name("status");
+    }
+
+    fn changed(&self) {
+        if let Some(p) = self.page.borrow().as_ref() {
+            p.set_title(&self.title());
+            let d = self.dir.borrow();
+            p.set_tooltip(&match self.query() {
+                Some(q) => q,
+                None => d.path().map_or_else(|| d.uri().to_string(), |p| p.display().to_string()),
+            });
+            p.set_icon(Some(&gio::ThemedIcon::new(if self.is_searching() {
+                "system-search-symbolic"
+            } else {
+                "folder-symbolic"
+            })));
+        }
+        let cb = self.on_change.borrow().clone();
+        if let Some(cb) = cb {
+            cb();
+        }
+    }
+
+    fn notify_select(&self) {
+        let cb = self.on_select.borrow().clone();
+        if let Some(cb) = cb {
+            cb();
+        }
+    }
+
+    pub fn git_status(&self, f: &gio::File) -> Option<char> {
+        self.git.borrow().as_ref().and_then(|g| g.get(&f.path()?))
+    }
+
+    /// Git status runs on a worker; the column appears once it's known this is a repo.
+    fn refresh_git(&self, f: &gio::File) {
+        let Some(p) = f.path() else {
+            *self.git.borrow_mut() = None;
+            self.git_col.set_visible(false);
+            return;
+        };
+        let me = self.me.clone();
+        let want = f.clone();
+        glib::spawn_future_local(async move {
+            let g = gio::spawn_blocking(move || crate::git::status(&p)).await.ok().flatten();
+            let Some(b) = me.upgrade() else { return };
+            if !b.dir.borrow().equal(&want) {
+                return;
+            }
+            *b.git.borrow_mut() = g.map(Rc::new);
+            b.git_col.set_visible(b.git.borrow().is_some() && !b.is_searching());
+            // rebind the column's cells (GTK keeps rows whose items didn't change)
+            let f = b.git_col.factory();
+            b.git_col.set_factory(None::<&gtk::ListItemFactory>);
+            b.git_col.set_factory(f.as_ref());
+            b.update_status();
+        });
+    }
+
+    fn update_status(&self) {
+        self.statusbar.remove_css_class("error");
+        let mut s = if self.is_searching() {
+            match self.search_state.borrow().clone() {
+                SearchState::Running => "Searching…".to_string(),
+                SearchState::Indexing => "Indexing…".to_string(),
+                SearchState::Done(o) => format!(
+                    "{} result{} · {} · {} ms",
+                    thousands(o.total as u64),
+                    if o.total == 1 { "" } else { "s" },
+                    glib::format_size(o.bytes),
+                    o.ms
+                ),
+                SearchState::BadQuery(e) => {
+                    self.statusbar.add_css_class("error");
+                    format!("Query error: {e}")
+                }
+                SearchState::Down(e) => {
+                    self.statusbar.add_css_class("error");
+                    e
+                }
+            }
+        } else {
+            let n = self.dir_sel.n_items();
+            let mut s = format!("{} item{}", thousands(n as u64), if n == 1 { "" } else { "s" });
+            if let Some(g) = self.git.borrow().as_ref() {
+                s = format!("\u{2387} {} · {s}", g.branch);
+            }
+            s
+        };
+        let sel = self.sel().selection().size();
+        if sel > 0 {
+            // ponytail: sums only the first 10k selected; Ctrl+A on a million search hits stays instant
+            let infos = self.selected_infos();
+            let bytes: u64 = infos.iter().take(10_000).filter(|i| !is_dirlike(i)).map(|i| i.size() as u64).sum();
+            s += &format!(" · {} selected ({})", thousands(sel), glib::format_size(bytes));
+        }
+        self.statusbar.set_text(&s);
+    }
+
+    fn activate(&self, pos: u32) {
+        let Some(info) = self.sel().item(pos).and_downcast::<gio::FileInfo>() else {
+            return;
+        };
+        self.open_info(&info);
+    }
+
+    /// Folders open in this tab (leaving any search); files open in their app.
+    pub fn open_info(&self, info: &gio::FileInfo) {
+        if let Some(q) = self.query() {
+            crate::sidebar::remember_search(&q);
+        }
+        if is_dirlike(info) {
+            if let Some(f) = nav_target(info) {
+                self.go(Loc::Dir(f));
+                // the row that had focus is gone; keep the keyboard in the file list
+                self.focus_view();
+            }
+        } else if let Some(f) = info_file(info) {
+            self.launch(&f, false);
+        }
+    }
+
+    pub fn launch(&self, f: &gio::File, ask: bool) {
+        let l = gtk::FileLauncher::new(Some(f));
+        l.set_always_ask(ask);
+        let ops = self.ops.clone();
+        l.launch(self.root.root().and_downcast::<gtk::Window>().as_ref(), gio::Cancellable::NONE, move |r| {
+            if let Err(e) = r
+                && !e.matches(gtk::DialogError::Dismissed)
+            {
+                ops.toast(e.message());
+            }
+        });
+    }
+
+    // ── column (Miller) view ──
+
+    fn miller_reset(&self, root: &gio::File) {
+        while let Some(c) = self.miller.first_child() {
+            self.miller.remove(&c);
+        }
+        *self.miller_sel.borrow_mut() = None;
+        self.miller_add(root.clone(), 0);
+    }
+
+    fn miller_add(&self, dir: gio::File, depth: usize) {
+        self.miller_truncate(depth);
+        let dl = gtk::DirectoryList::new(Some(ATTRS), Some(&dir));
+        let filt = gtk::FilterListModel::new(Some(dl), Some(self.filter.clone()));
+        let sorter = gtk::CustomSorter::new(|a, b| {
+            let (a, b) = (info_of(a), info_of(b));
+            cmp(
+                (!is_dirlike(a), a.display_name().to_lowercase()),
+                (!is_dirlike(b), b.display_name().to_lowercase()),
+            )
+        });
+        let sorted = gtk::SortListModel::new(Some(filt), Some(sorter));
+        let sel = gtk::SingleSelection::builder().model(&sorted).autoselect(false).can_unselect(true).build();
+        sel.set_selected(gtk::INVALID_LIST_POSITION);
+        let f = gtk::SignalListItemFactory::new();
+        f.connect_setup(|_, item| {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            row.append(&gtk::Image::builder().pixel_size(16).build());
+            row.append(
+                &gtk::Label::builder()
+                    .xalign(0.0)
+                    .hexpand(true)
+                    .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                    .build(),
+            );
+            row.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+            item.downcast_ref::<gtk::ListItem>().unwrap().set_child(Some(&row));
+        });
+        f.connect_bind(|_, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+            let (Some(row), Some(info)) = (item.child(), item.item().and_downcast::<gio::FileInfo>()) else {
+                return;
+            };
+            let img = row.first_child().and_downcast::<gtk::Image>().unwrap();
+            set_icon(&img, &info);
+            img.set_pixel_size(16);
+            img.next_sibling().and_downcast::<gtk::Label>().unwrap().set_text(&info.display_name());
+            row.last_child().unwrap().set_opacity(if is_dirlike(&info) { 0.5 } else { 0.0 });
+        });
+        let lv = gtk::ListView::new(Some(sel.clone()), Some(f));
+        lv.add_css_class("navigation-sidebar");
+        let me = self.me.clone();
+        sel.connect_selected_item_notify(move |s| {
+            let (Some(b), Some(info)) = (me.upgrade(), s.selected_item().and_downcast::<gio::FileInfo>()) else {
+                return;
+            };
+            let Some(f) = info_file(&info) else { return };
+            *b.miller_sel.borrow_mut() = Some(f.clone());
+            if is_dirlike(&info) {
+                b.miller_add(nav_target(&info).unwrap_or(f), depth + 1);
+            } else {
+                b.miller_truncate(depth + 1);
+            }
+            b.notify_select();
+        });
+        let me = self.me.clone();
+        lv.connect_activate(move |lv, pos| {
+            let (Some(b), Some(info)) = (me.upgrade(), lv.model().and_then(|m| m.item(pos)).and_downcast::<gio::FileInfo>()) else {
+                return;
+            };
+            b.open_info(&info);
+        });
+        let col = gtk::ScrolledWindow::builder()
+            .child(&lv)
+            .width_request(240)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .css_classes(["miller-col"])
+            .build();
+        self.miller.append(&col);
+        // keep the newest column in view
+        let sc = self.miller_scroll.clone();
+        glib::idle_add_local_once(move || {
+            let a = sc.hadjustment();
+            a.set_value(a.upper() - a.page_size());
+        });
+    }
+
+    /// Drop columns from `depth` rightwards.
+    fn miller_truncate(&self, depth: usize) {
+        let mut c = self.miller.first_child();
+        let mut i = 0;
+        while let Some(w) = c {
+            c = w.next_sibling();
+            if i >= depth {
+                self.miller.remove(&w);
+            }
+            i += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn helpers() {
+        assert_eq!(super::thousands(0), "0");
+        assert_eq!(super::thousands(1234), "1,234");
+        assert_eq!(super::thousands(1234567), "1,234,567");
+        assert!(super::as_location("no-such-thing").is_none());
+        assert!(super::as_location("/").is_some());
+        assert!(super::as_location("/definitely/not/here/x").is_none());
+        assert!(super::as_location("sftp://host/").is_some());
+    }
+}

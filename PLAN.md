@@ -1,4 +1,4 @@
-# Chimera — Everything's engine + Files' UX, for Linux
+# Kestrel — Everything's engine + Files' UX, for Linux
 
 Target: Ubuntu 26.04 / GNOME / ext4. Rust. Ships as one `.deb`.
 Scope (decided 2026-10-25): **all** Everything technical features + **all** Files UX features.
@@ -8,14 +8,14 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 
 | crate | binary | job |
 |---|---|---|
-| `chimera-index` | lib | in-memory index, walker, query language, matcher, sort, live reconcile, wire protocol (`proto`, JSON lines) |
-| `chimera-indexd` | `chimera-indexd` | root systemd service: fanotify live updates, socket server, permission filter, HTTP server |
-| `cx` | `cx` | CLI client, `es.exe` equivalent |
-| `chimera` | `chimera` | GTK4 + libadwaita app: search + file manager |
+| `kestrel-index` | lib | in-memory index, walker, query language, matcher, sort, live reconcile, wire protocol (`proto`, JSON lines) |
+| `kestrel-indexd` | `kestrel-indexd` | root systemd service: fanotify live updates, socket server, permission filter, HTTP server |
+| `ks` | `ks` | CLI client, `es.exe` equivalent |
+| `kestrel` | `kestrel` | GTK4 + libadwaita app: search + file manager |
 
 ## Phases
 
-### 1. Index core (`chimera-index`) — DONE 2026-10-25
+### 1. Index core (`kestrel-index`) — DONE 2026-10-25
 - Entry = `{name_off, parent: u32, size, mtime, mode, uid, gid, kind}`; names in one big arena (Everything-style, target <100 B/file).
 - Parallel first scan with `jwalk`, one per mount, `-xdev`, skip pseudo-fs (proc, sys, dev, run, snap squashfs).
 - Pre-sorted index arrays per column (name, path, size, mtime, ext) → instant re-sort.
@@ -24,19 +24,19 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 - ~~Snapshot to disk~~ skipped: boot rescan is 2.4 s warm. Add if cold-boot scan proves slow.
 - **Check:** unit tests for parser + matcher; bench on real `/` (target: full scan <10 s for ~2M files, query <50 ms).
 
-### 2. Daemon (`chimera-indexd`) — BUILT 2026-10-25, fanotify path awaiting root smoke test
-- Excludes: `/etc/chimera/excludes` (default `/timeshift`): 5.42M → 1.95M entries, 2.4 s, ~232 MB.
+### 2. Daemon (`kestrel-indexd`) — BUILT 2026-10-25, fanotify path awaiting root smoke test
+- Excludes: `/etc/kestrel/excludes` (default `/timeshift`): 5.42M → 1.95M entries, 2.4 s, ~232 MB.
 - `fanotify` `FAN_MARK_FILESYSTEM` + `FAN_REPORT_DFID_NAME` per local fs → create/delete/rename/modify applied live.
   - Overflow (`FAN_Q_OVERFLOW`) → rescan that subtree.
-- Unix socket `/run/chimera/sock`; `SO_PEERCRED` → caller uid + groups.
+- Unix socket `/run/kestrel/sock`; `SO_PEERCRED` → caller uid + groups.
 - **Permission filter:** a path is returned only if the caller could `stat` it: every ancestor dir needs `x` for caller (mode bits + POSIX ACLs read at index time). Default-deny on anything unreadable. This is the security boundary — gets its own tests.
 - systemd unit, hardened (`ProtectHome=read-only`, `CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH`, `NoNewPrivileges`).
 - Optional HTTP server (Everything "ETP/HTTP"), localhost-only by default, off by default.
 
-### 3. CLI (`cx`) — DONE 2026-10-25
-- `cx <query>` with `-n`, `-s/--sort`, `--json`, `-0`, `--size --dm` columns, exit 1 on no match. Good enough for `cx ext:pdf invoice | fzf`.
+### 3. CLI (`ks`) — DONE 2026-10-25
+- `ks <query>` with `-n`, `-s/--sort`, `--json`, `-0`, `--size --dm` columns, exit 1 on no match. Good enough for `ks ext:pdf invoice | fzf`.
 
-### 4. App shell (`chimera`) — DONE 2026-10-25
+### 4. App shell (`kestrel`) — DONE 2026-10-25
 - `AdwTabView` tabs (drag out to new window, pin, restore session).
 - Dual pane (`GtkPaned`), each pane an independent tab set.
 - Views: details (`GtkColumnView`, virtualized), grid, column/Miller.
@@ -52,8 +52,8 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 - Command palette (Ctrl+Shift+P), all actions + keybindings.
 - Properties dialog, open-with, terminal here, compress/extract.
 
-### 6. Packaging — DONE 2026-10-25 (`target/debian/chimera_0.1.0-1_amd64.deb`, 1.5 MB)
-- `cargo-deb` on the workspace: binaries, `.desktop`, icon, systemd unit, `postinst` (create `/var/lib/chimera`, enable service).
+### 6. Packaging — DONE 2026-10-25 (`target/debian/kestrel_0.1.0-1_amd64.deb`, 1.5 MB)
+- `cargo-deb` on the workspace: binaries, `.desktop`, icon, systemd unit, `postinst` (create `/var/lib/kestrel`, enable service).
 - Depends: `libgtk-4-1`, `libadwaita-1-0`, `libgit2`, `libpoppler-glib8`, gstreamer base.
 
 ### 7. Extras (Everything parity) — DONE 2026-10-25
@@ -75,11 +75,11 @@ sudo apt install libgtk-4-dev libadwaita-1-dev libgit2-dev libpoppler-glib-dev \
 ## As built (2026-10-25)
 - Query extras: `content:` (permission-checked BEFORE reading, 64 MB cap), `dupe:` `sizedupe:` `namesizedupe:`,
   `depth:`, `empty:`, `parent:`, `under:`, `tag:`.
-- HTTP: `chimera-indexd --http 127.0.0.1:8899 --http-user alex` (searches as that user; root refused; no downloads).
+- HTTP: `kestrel-indexd --http 127.0.0.1:8899 --http-user alex` (searches as that user; root refused; no downloads).
   The packaged unit has `PrivateNetwork=yes` + `RestrictAddressFamilies=AF_UNIX`; enabling HTTP needs a drop-in
-  (`systemctl edit chimera-indexd`) clearing both and adding the flags to ExecStart.
-- GUI saves state in `~/.config/chimera/` (session.json, history, searches); bookmarks shared with Nautilus.
-- Headless checks: `GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 chimera --screenshot out.png [--select NAME] [--action NAME[::target]] PATH`
+  (`systemctl edit kestrel-indexd`) clearing both and adding the flags to ExecStart.
+- GUI saves state in `~/.config/kestrel/` (session.json, history, searches); bookmarks shared with Nautilus.
+- Headless checks: `GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 kestrel --screenshot out.png [--select NAME] [--action NAME[::target]] PATH`
   (run `gtk4-broadwayd :7` first; dialogs land in `out.png.dialog.png`).
 - Tests: 13 (`cargo test --release --workspace`). `scripts/smoke-live.sh` (needs sudo) covers fanotify live updates.
 

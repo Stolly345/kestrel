@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Kestrel
+GenericName=File Manager
+Comment=Browse files and search your whole disk instantly
+Exec=kestrel %U
+Icon=dev.kestrel.Kestrel
+Terminal=false
+Type=Application
+Categories=GTK;GNOME;System;FileTools;FileManager;Core;
+MimeType=inode/directory;
+Keywords=files;folders;search;everything;explorer;
+StartupNotify=true

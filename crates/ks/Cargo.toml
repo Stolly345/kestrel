@@ -1,0 +1,10 @@
+[package]
+name = "ks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kestrel-index = { path = "../kestrel-index" }
+serde_json = "1"
+chrono = "0.4"

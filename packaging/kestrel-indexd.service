@@ -1,0 +1,24 @@
+[Unit]
+Description=Kestrel file index (Everything-style live search)
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/bin/kestrel-indexd
+Restart=on-failure
+RuntimeDirectory=kestrel
+RuntimeDirectoryMode=0755
+# index snapshot (lists every filename): root-only
+StateDirectory=kestrel
+StateDirectoryMode=0700
+Nice=10
+IOSchedulingClass=idle
+# read-only view of the system; it only needs to stat and watch
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

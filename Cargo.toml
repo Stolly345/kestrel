@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/chimera-index", "crates/chimera-indexd", "crates/cx", "crates/chimera"]
+members = ["crates/kestrel-index", "crates/kestrel-indexd", "crates/ks", "crates/kestrel"]
 
 [workspace.package]
-version = "0.7.2"
+version = "0.9.1"
 edition = "2024"
 license = "MIT"
 

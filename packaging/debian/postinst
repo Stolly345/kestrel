@@ -1,3 +1,9 @@
 #!/bin/sh
 set -e
+# Kestrel was called Chimera before 0.9: its index snapshot is root-owned and dpkg doesn't track
+# it, so clear it once the old package is gone (it holds file names from every user).
+if [ "$1" = configure ] && [ -d /var/lib/chimera ] \
+   && ! dpkg-query -W -f='${db:Status-Status}' chimera 2>/dev/null | grep -qx installed; then
+    rm -rf /var/lib/chimera
+fi
 #DEBHELPER#

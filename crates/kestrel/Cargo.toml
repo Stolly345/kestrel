@@ -1,0 +1,53 @@
+[package]
+name = "kestrel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "File manager with instant whole-disk search (Everything + Files for Linux)"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
+kestrel-index = { path = "../kestrel-index" }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+git2 = { version = "0.21", default-features = false }
+libc = "0.2"
+pulldown-cmark = { version = "0.13.5", default-features = false }
+
+[package.metadata.deb]
+name = "kestrel"
+maintainer = "Stolly345 <114888417+Stolly345@users.noreply.github.com>"
+copyright = "2026, Alex Stoll"
+extended-description = """\
+Kestrel pairs Everything's instant whole-disk search (a root daemon indexing \
+every local filesystem, kept live with fanotify, results filtered to what the \
+asking user may see) with a Files-style GTK4 file manager: tabs, dual pane, \
+details/grid/column views, preview pane, git status, color tags and a command \
+palette. Includes the `ks` command-line search client."""
+section = "utils"
+priority = "optional"
+depends = "$auto, bubblewrap, tar"
+conflicts = "chimera"
+replaces = "chimera"
+recommends = "gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
+conf-files = ["/etc/kestrel/excludes"]
+maintainer-scripts = "../../packaging/debian/"
+assets = [
+    ["target/release/kestrel", "usr/bin/", "755"],
+    ["target/release/kestrel-indexd", "usr/bin/", "755"],
+    ["target/release/ks", "usr/bin/", "755"],
+    ["../../packaging/excludes", "etc/kestrel/excludes", "644"],
+    ["../../packaging/dev.kestrel.Kestrel.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/dev.kestrel.Kestrel.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../PLAN.md", "usr/share/doc/kestrel/PLAN.md", "644"],
+    ["../../packaging/7zip/7zz", "usr/lib/kestrel/7zz", "755"],
+    ["../../packaging/7zip/License.txt", "usr/share/doc/kestrel/7zip-License.txt", "644"],
+]
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "../../packaging"
+unit-name = "kestrel-indexd"
+enable = true
+start = true
+restart-after-upgrade = true
