@@ -71,6 +71,7 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 sudo apt install libgtk-4-dev libadwaita-1-dev libgit2-dev libpoppler-glib-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libvte-2.91-gtk4-dev pkg-config
 ```
+Runtime, recommended, build and test-sample dependencies: README.md.
 
 ## As built (2026-10-25)
 - Query extras: `content:` (permission-checked BEFORE reading, 64 MB cap), `dupe:` `sizedupe:` `namesizedupe:`,
