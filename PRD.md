@@ -318,3 +318,18 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   squeezed unreadable. Now: one page, "‹ 3 / 12 ›" above it (above, so the arrows don't move as page heights change),
   mouse wheel/touchpad over the page flips pages (past either end the pane scrolls as usual). No 20-page cap: pdfinfo
   gives the count and each page renders on first view (sandboxed pdftoppm, cached; Office converts to PDF once).
+- **v0.9.3 (2026-10-25): tags rethought (Finder-style), preview panel, header + path-bar tweaks.** Tags were buried
+  (sidebar section below Devices, a two-level right-click submenu of colour names). Now: a row of colour dots in the
+  right-click menu (one click toggles on the selection; checks show tags every selected file has; Clear at the end),
+  a dot row under the sidebar places (click = index search `tag:colour`), and dots under the name in the preview
+  (acting on the previewed file). Fixed along the way: a file whose attributes change (tagged, saved) was replaced in
+  place by GtkDirectoryList and silently dropped from the selection; selections now survive in-place updates. Preview
+  pane is its own titled panel (sidebar shade, border, "Preview" header with close). Scope picker (Everywhere/This
+  Folder) moved next to the View button. Path bar: clicking the current folder refreshes, clicking it again edits
+  the path. New app icon: an original drawing of an American kestrel on a perch (packaging/dev.kestrel.Kestrel.svg).
+  Modified column (and preview) shows time first with a relative date: "14:32 Today", "09:05 Yesterday",
+  "18:40 12 Oct", "18:40 12 Oct 2024"; Preferences → Appearance → Time format: Follow System (GNOME clock-format) /
+  24-hour / 12-hour, applied live. Sorting still uses the timestamp. Sidebar Tags row moved to the very top, above Home.
+  Preferences → Browsing → File type names: Full ("Microsoft Excel Worksheet", GIO's description) / Short ("Excel":
+  drops "Microsoft" and a trailing generic noun) / Extension ("XLSX", "TAR.GZ"); Type column sorts by what it shows.
+  Unknown types ("text/x-foo type") show as "RS file" instead.

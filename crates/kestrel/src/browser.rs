@@ -140,13 +140,71 @@ fn mtime(i: &gio::FileInfo) -> i64 {
     i.modification_date_time().map_or(0, |d| d.to_unix())
 }
 
+/// The Type column, in the style chosen in Preferences.
+pub fn type_label(i: &gio::FileInfo) -> String {
+    let desc = i.content_type().map(|c| gio::content_type_get_description(&c).to_string()).unwrap_or_default();
+    let name = i.name();
+    let ext = (i.file_type() != gio::FileType::Directory).then(|| name.to_str().and_then(extension)).flatten();
+    type_text(&desc, ext.as_deref(), crate::prefs::type_style())
+}
+
+/// "report.TAR.gz" -> "TAR.GZ", "a.xlsx" -> "XLSX"; none for dotfiles and names without one.
+fn extension(name: &str) -> Option<String> {
+    let lower = name.to_lowercase();
+    let start = match lower.rfind(".tar.") {
+        Some(p) if p > 0 => p + 1,
+        _ => lower.rfind('.').filter(|&p| p > 0 && p + 1 < lower.len())? + 1,
+    };
+    Some(name[start..].to_uppercase())
+}
+
+fn type_text(desc: &str, ext: Option<&str>, style: crate::prefs::TypeStyle) -> String {
+    use crate::prefs::TypeStyle;
+    // GIO's fallback for unknown types is "text/x-foo type": no better than the extension
+    let unknown = desc.is_empty() || desc.ends_with(" type") && desc.contains('/');
+    match style {
+        TypeStyle::Extension => ext.map(str::to_string).unwrap_or_else(|| desc.to_string()),
+        _ if unknown => ext.map(|e| format!("{e} file")).unwrap_or_else(|| desc.to_string()),
+        TypeStyle::Full => desc.to_string(),
+        TypeStyle::Short => {
+            // "Microsoft Excel Worksheet" -> "Excel", "JPEG image" -> "JPEG", "Tar archive (gzip-compressed)" -> "Tar"
+            let d = desc.split(" (").next().unwrap_or(desc);
+            let d = d.strip_prefix("Microsoft ").unwrap_or(d);
+            const GENERIC: [&str; 9] =
+                ["document", "worksheet", "spreadsheet", "presentation", "image", "video", "audio", "archive", "file"];
+            match d.rsplit_once(' ') {
+                Some((head, last)) if GENERIC.contains(&last.to_lowercase().as_str()) => head.to_string(),
+                _ => d.to_string(),
+            }
+        }
+    }
+}
+
+/// Modified time, time first: "14:32 Today", "09:05 Yesterday", "18:40 12 Oct", "18:40 12 Oct 2024".
 pub fn fmt_date(i: &gio::FileInfo) -> String {
+    let now = glib::DateTime::now_local().ok();
     i.modification_date_time()
         .filter(|d| d.to_unix() != 0)
         .and_then(|d| d.to_local().ok())
-        .and_then(|d| d.format("%Y-%m-%d %H:%M").ok())
-        .map(|s| s.to_string())
+        .zip(now)
+        .map(|(d, now)| fmt_when(&d, &now, crate::prefs::get().clock_12h()))
         .unwrap_or_default()
+}
+
+fn fmt_when(d: &glib::DateTime, now: &glib::DateTime, h12: bool) -> String {
+    let f = |fmt: &str| d.format(fmt).map(|s| s.trim().to_string()).unwrap_or_default();
+    let time = f(if h12 { "%l:%M %p" } else { "%H:%M" });
+    let same_day = |a: &glib::DateTime, b: &glib::DateTime| (a.year(), a.day_of_year()) == (b.year(), b.day_of_year());
+    let date = if same_day(d, now) {
+        "Today".into()
+    } else if now.add_days(-1).is_ok_and(|y| same_day(d, &y)) {
+        "Yesterday".into()
+    } else if d.year() == now.year() {
+        f("%e %b")
+    } else {
+        f("%e %b %Y")
+    };
+    format!("{time} {date}")
 }
 
 /// 1234567 -> "1,234,567"
@@ -217,6 +275,8 @@ pub struct Browser {
     search_sel: gtk::MultiSelection,
     item_menu: gtk::PopoverMenu,
     bg_menu: gtk::PopoverMenu,
+    /// The colour dots inside item_menu, checked for the selection on every popup.
+    tag_picker: gtk::Box,
     dir_col: gtk::ColumnViewColumn,
     git_col: gtk::ColumnViewColumn,
     git: RefCell<Option<Rc<crate::git::GitInfo>>>,
@@ -467,15 +527,15 @@ impl Browser {
             "Modified",
             label_factory(&me, 0.0, fmt_date),
             gtk::CustomSorter::new(|a, b| cmp(mtime(info_of(a)), mtime(info_of(b)))),
-            140,
+            // fits the longest form, "12:30 PM 14 Mar 2025"
+            170,
         );
         let type_col = col(
             "Type",
-            label_factory(&me, 0.0, |i| {
-                i.content_type().map(|c| gio::content_type_get_description(&c).to_string()).unwrap_or_default()
-            }),
-            gtk::CustomSorter::new(|a, b| cmp(info_of(a).content_type(), info_of(b).content_type())),
-            130,
+            label_factory(&me, 0.0, type_label),
+            gtk::CustomSorter::new(|a, b| cmp(type_label(info_of(a)), type_label(info_of(b)))),
+            // fits "Microsoft PowerPoint Presentation" (the Full style)
+            220,
         );
         let gw = me.clone();
         let git_col = gtk::ColumnViewColumn::builder()
@@ -609,6 +669,14 @@ impl Browser {
             p
         };
         let (item_menu, bg_menu) = (menu(item_model), menu(bg_model));
+        let im = item_menu.downgrade();
+        let tag_picker = crate::tags::picker(move |t| {
+            if let Some(m) = im.upgrade() {
+                let _ = m.activate_action("win.tag", Some(&t.to_variant()));
+                m.popdown();
+            }
+        });
+        item_menu.add_child(&tag_picker, "tags");
         let cols = vec![
             (name_col, Sort::Name),
             (dir_col.clone(), Sort::Path),
@@ -640,6 +708,7 @@ impl Browser {
             search_sel,
             item_menu,
             bg_menu,
+            tag_picker,
             dir_col,
             git_col,
             git: RefCell::default(),
@@ -693,15 +762,38 @@ impl Browser {
         }
 
         for sel in [&self.dir_sel, &self.search_sel] {
+            // A file whose attributes change (tagged, saved) is replaced in place in the model,
+            // which drops it from the selection: remember what's selected and put it back.
+            let selected = Rc::new(RefCell::new(std::collections::HashSet::<std::path::PathBuf>::new()));
             let w = me.clone();
-            sel.connect_selection_changed(move |_, _, _| {
+            let sn = selected.clone();
+            sel.connect_selection_changed(move |sel, _, _| {
+                let bs = sel.selection();
+                *sn.borrow_mut() = (0..bs.size() as u32)
+                    .filter_map(|i| sel.item(bs.nth(i)).and_downcast::<gio::FileInfo>())
+                    .filter_map(|i| info_file(&i).and_then(|f| f.path()))
+                    .collect();
                 if let Some(b) = w.upgrade() {
                     b.update_status();
                     b.notify_select();
                 }
             });
             let w = me.clone();
-            sel.connect_items_changed(move |_, _, _, _| w.upgrade().into_iter().for_each(|b| b.update_status()));
+            sel.connect_items_changed(move |sel, pos, removed, added| {
+                if removed == added && added > 0 && !selected.borrow().is_empty() {
+                    for i in pos..pos + added {
+                        let was = sel
+                            .item(i)
+                            .and_downcast::<gio::FileInfo>()
+                            .and_then(|i| info_file(&i).and_then(|f| f.path()))
+                            .is_some_and(|p| selected.borrow().contains(&p));
+                        if was && !sel.is_selected(i) {
+                            sel.select_item(i, false);
+                        }
+                    }
+                }
+                w.upgrade().into_iter().for_each(|b| b.update_status());
+            });
         }
 
         // files appearing/changing in a repo: re-run git status, at most twice a second
@@ -789,7 +881,14 @@ impl Browser {
         self.loc_entry.add_controller(fc);
     }
 
+    /// Tags every selected file has (shown checked in the menu's colour dots).
+    fn sync_tags(&self) {
+        let bits = self.selected_files().iter().fold(u8::MAX, |acc, f| acc & crate::tags::read(f));
+        crate::tags::set_picker(&self.tag_picker, if bits == u8::MAX { 0 } else { bits });
+    }
+
     fn popup(&self, menu: &gtk::PopoverMenu, w: &gtk::Widget, x: f64, y: f64) {
+        self.sync_tags();
         let p = w
             .compute_point(&self.root, &graphene::Point::new(x as f32, y as f32))
             .unwrap_or(graphene::Point::new(x as f32, y as f32));
@@ -800,6 +899,7 @@ impl Browser {
     /// Keyboard context menu: at the view's top-left area.
     pub fn context_menu(&self) {
         let menu = if self.selected_files().is_empty() { &self.bg_menu } else { &self.item_menu };
+        self.sync_tags();
         menu.set_pointing_to(Some(&gdk::Rectangle::new(48, 96, 1, 1)));
         menu.popup();
     }
@@ -1157,13 +1257,30 @@ impl Browser {
                 _ if d.equal(&home) => b.set_icon_name("user-home-symbolic"),
                 _ => b.set_label(&dir_title(d)),
             }
-            b.set_tooltip_text(Some(&d.path().map_or_else(|| d.uri().to_string(), |p| p.display().to_string())));
+            let path = d.path().map_or_else(|| d.uri().to_string(), |p| p.display().to_string());
             let (me, d) = (self.me.clone(), d.clone());
-            b.connect_clicked(move |_| {
-                if let Some(b) = me.upgrade() {
-                    b.go(Loc::Dir(d.clone()));
-                }
-            });
+            if i + 1 == chain.len() {
+                // the folder you're in: first click refreshes, the next one edits the path
+                // (crumbs are rebuilt on navigation, which re-arms the refresh)
+                b.set_tooltip_text(Some(&format!("{path}\nClick to refresh, click again to edit")));
+                let armed = Cell::new(false);
+                b.connect_clicked(move |_| {
+                    if let Some(b) = me.upgrade() {
+                        if armed.replace(true) {
+                            b.edit_location();
+                        } else {
+                            b.reload();
+                        }
+                    }
+                });
+            } else {
+                b.set_tooltip_text(Some(&path));
+                b.connect_clicked(move |_| {
+                    if let Some(b) = me.upgrade() {
+                        b.go(Loc::Dir(d.clone()));
+                    }
+                });
+            }
             c.append(&b);
         }
         crate::label_icon_buttons(c.upcast_ref());
@@ -1585,6 +1702,41 @@ impl Browser {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn type_names() {
+        use crate::prefs::TypeStyle::*;
+        let t = |d, e: Option<&str>, s| super::type_text(d, e, s);
+        assert_eq!(t("Microsoft Excel Worksheet", Some("XLSX"), Full), "Microsoft Excel Worksheet");
+        assert_eq!(t("Microsoft Excel Worksheet", Some("XLSX"), Short), "Excel");
+        assert_eq!(t("Microsoft Excel Worksheet", Some("XLSX"), Extension), "XLSX");
+        assert_eq!(t("Microsoft PowerPoint Presentation", None, Short), "PowerPoint");
+        assert_eq!(t("Plain text document", None, Short), "Plain text");
+        assert_eq!(t("Tar archive (gzip-compressed)", None, Short), "Tar");
+        assert_eq!(t("Folder", None, Extension), "Folder");
+        assert_eq!(t("Shell script", None, Short), "Shell script");
+        assert_eq!(t("text/x-rust type", Some("RS"), Full), "RS file");
+        assert_eq!(super::extension("Q3 report.xlsx").as_deref(), Some("XLSX"));
+        assert_eq!(super::extension("backup.tar.gz").as_deref(), Some("TAR.GZ"));
+        assert_eq!(super::extension(".bashrc"), None);
+        assert_eq!(super::extension("Makefile"), None);
+    }
+
+    #[test]
+    fn modified_column_dates() {
+        use gtk::glib;
+        let tz = glib::TimeZone::utc();
+        let at = |y, mo, d, h, mi| glib::DateTime::new(&tz, y, mo, d, h, mi, 0.0).unwrap();
+        let now = at(2026, 10, 26, 15, 0);
+        let w = |d: glib::DateTime, now: &glib::DateTime, h12| super::fmt_when(&d, now, h12);
+        assert_eq!(w(at(2026, 10, 26, 9, 5), &now, false), "09:05 Today");
+        assert_eq!(w(at(2026, 10, 25, 23, 20), &now, false), "23:20 Yesterday");
+        assert_eq!(w(at(2026, 10, 2, 18, 40), &now, false), "18:40 2 Oct");
+        assert_eq!(w(at(2024, 12, 31, 18, 40), &now, false), "18:40 31 Dec 2024");
+        assert_eq!(w(at(2026, 10, 26, 14, 32), &now, true), "2:32 PM Today");
+        // yesterday across a year boundary
+        assert_eq!(w(at(2025, 12, 31, 8, 0), &at(2026, 1, 1, 10, 0), false), "08:00 Yesterday");
+    }
+
     #[test]
     fn helpers() {
         assert_eq!(super::thousands(0), "0");

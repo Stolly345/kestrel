@@ -132,12 +132,10 @@ fn menus() -> (gio::Menu, gio::Menu) {
     s.append(Some("Delete Permanently…"), Some("win.delete"));
     item.append_section(None, &s);
     let s = gio::Menu::new();
-    let tags = gio::Menu::new();
-    for t in kestrel_index::TAGS {
-        tags.append(Some(&format!("{}{}", t[..1].to_uppercase(), &t[1..])), Some(&format!("win.tag::{t}")));
-    }
-    tags.append(Some("Clear Tags"), Some("win.tag::none"));
-    s.append_submenu(Some("Tags"), &tags);
+    // colour dots, one click to tag (Browser adds the widget for this "custom" slot)
+    let tags = gio::MenuItem::new(None, None);
+    tags.set_attribute_value("custom", Some(&"tags".to_variant()));
+    s.append_item(&tags);
     s.append(Some("Compress…"), Some("win.compress"));
     s.append(Some("Extract Here"), Some("win.extract"));
     s.append(Some("Browse Archive"), Some("win.browse-archive"));
@@ -251,7 +249,6 @@ impl Win {
             .build();
         let row = gtk::Box::builder().spacing(6).css_classes(["search-row"]).build();
         row.append(&entry);
-        row.append(&scope);
         row.append(&help);
         let clamp = adw::Clamp::builder()
             .maximum_size(760)
@@ -380,6 +377,8 @@ impl Win {
                 .tooltip_text("View")
                 .build(),
         );
+        // what to search sits with the view controls, right against the View button
+        header.pack_end(&scope_w);
 
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
@@ -1244,6 +1243,9 @@ impl Win {
                 move || {
                     if let Some(w) = me.upgrade() {
                         w.set_hidden(crate::prefs::get().show_hidden);
+                        // re-list so rows pick up display settings (time format)
+                        w.panes.iter().flat_map(|p| p.browsers()).for_each(|b| b.reload());
+                        w.refresh_preview();
                     }
                 },
                 move |m| ops.toast(m),
@@ -1277,23 +1279,8 @@ impl Win {
             let (Some(w), Some(t)) = (me.upgrade(), v.and_then(|v| v.get::<String>())) else {
                 return;
             };
-            let files = w.sel();
-            let bit = kestrel_index::tag_bits(&t);
-            // toggle: if every selected file has it, remove it; otherwise add it to all
-            let all = files.iter().all(|f| crate::tags::read(f) & bit != 0);
-            for f in &files {
-                let cur = crate::tags::read(f);
-                let new = if t == "none" {
-                    0
-                } else if all {
-                    cur & !bit
-                } else {
-                    cur | bit
-                };
-                if let Err(e) = crate::tags::write(f, new) {
-                    w.ops.toast(&format!("Couldn't tag: {e}"));
-                    return;
-                }
+            if let Err(e) = crate::tags::toggle(&w.sel(), &t) {
+                w.ops.toast(&format!("Couldn't tag: {e}"));
             }
         });
         self.window.add_action(&a);

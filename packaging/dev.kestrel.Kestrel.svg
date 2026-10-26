@@ -1,13 +1,68 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Kestrel app icon: an American kestrel on a perch (original drawing) -->
   <defs>
-    <linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#62a0ea"/>
-      <stop offset="1" stop-color="#3584e4"/>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#99c1f1"/>
+      <stop offset="0.65" stop-color="#c0d6ee"/>
+      <stop offset="1" stop-color="#e8d5b5"/>
     </linearGradient>
+    <linearGradient id="breast" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0b17a"/>
+      <stop offset="1" stop-color="#fbeedd"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7d93b8"/>
+      <stop offset="1" stop-color="#4f6286"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="8" y="8" width="112" height="112" rx="26"/></clipPath>
   </defs>
-  <path d="M14 30a8 8 0 0 1 8-8h28l10 10h46a8 8 0 0 1 8 8v58a8 8 0 0 1-8 8H22a8 8 0 0 1-8-8z" fill="#1c71d8"/>
-  <rect x="14" y="40" width="100" height="66" rx="8" fill="url(#f)"/>
-  <circle cx="58" cy="70" r="17" fill="none" stroke="#fff" stroke-width="7"/>
-  <path d="M70 82l16 16" stroke="#fff" stroke-width="9" stroke-linecap="round"/>
-  <path d="M92 46l-6 12h8l-8 14" fill="none" stroke="#f6d32d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- backdrop -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#sky)"/>
+  <g clip-path="url(#tile)">
+  <g transform="translate(-14 1) scale(1.14)">
+  <!-- tail (rufous, black band, pale tip) -->
+  <path d="M60 80 L70 76 L90 100 L84 105 Z" fill="#c4622d"/>
+  <path d="M81 95 L86 91 L89 96 L84 100 Z" fill="#241f31"/>
+  <!-- back -->
+  <path d="M54 20 C66 24 74 40 74 58 L70 84 L60 86 C64 66 62 46 52 34 Z" fill="#c96a3a"/>
+  <!-- breast / belly -->
+  <path d="M41 36 C33 48 33 66 39 78 C43 86 51 91 60 90 L67 84 C70 66 66 48 58 38 Z" fill="url(#breast)"/>
+  <!-- breast spots -->
+  <g fill="#241f31">
+    <circle cx="46" cy="58" r="1.6"/><circle cx="52" cy="54" r="1.6"/><circle cx="44" cy="66" r="1.6"/>
+    <circle cx="51" cy="63" r="1.6"/><circle cx="57" cy="60" r="1.6"/><circle cx="48" cy="72" r="1.5"/>
+    <circle cx="55" cy="70" r="1.5"/>
+  </g>
+  <!-- folded wing (blue-grey) with dark primaries -->
+  <path d="M57 38 C70 44 77 58 79 74 L89 98 L83 99 L66 84 C59 70 55 54 57 38 Z" fill="url(#wing)"/>
+  <path d="M79 74 L89 98 L83 99 L72 86 Z" fill="#2e3440"/>
+  <g fill="#241f31">
+    <circle cx="66" cy="54" r="1.7"/><circle cx="70" cy="62" r="1.7"/><circle cx="64" cy="66" r="1.7"/>
+    <circle cx="73" cy="70" r="1.6"/><circle cx="68" cy="76" r="1.6"/>
+  </g>
+  <!-- head -->
+  <circle cx="49" cy="30" r="13" fill="#fbeedd"/>
+  <path d="M36.5 28 C38 18 46 15 53 16.5 C59 18 62 23 62 29 C57 25 50 23 42 25 Z" fill="#6f84a8"/>
+  <path d="M53 16.5 C57 17 59.5 19.5 60.5 22 C57.5 21 55 20 53 16.5 Z" fill="#c96a3a"/>
+  <!-- facial stripes ("tear" and "ear" marks) -->
+  <path d="M49.5 32 C48.5 36.5 48.5 40 50 44" stroke="#241f31" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+  <path d="M57 29 C58 32.5 58.3 35.5 57.8 39" stroke="#241f31" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+  <!-- eye -->
+  <circle cx="50" cy="27.5" r="3.6" fill="#1e1a24" stroke="#f5c211" stroke-width="1.3"/>
+  <circle cx="49" cy="26.4" r="1" fill="#fff"/>
+  <!-- beak with yellow cere -->
+  <path d="M38 26.5 C33 26.5 30 30 31 34.5 L34 32.5 L38.5 31 Z" fill="#3d3846"/>
+  <path d="M37 25.5 C39 24.5 41 25.2 41.5 27 L38.5 30 Z" fill="#f5c211"/>
+  </g>
+  </g>
+  <!-- perch -->
+  <path d="M12 106 C40 101 80 102 116 95" stroke="#6b4a2b" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <path d="M88 101 C94 95 98 91 106 87" stroke="#6b4a2b" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M26 104 C24 98 20 94 16 92" stroke="#6b4a2b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <g fill="#e8d5b5" stroke="#9a7650" stroke-width="0.8">
+    <circle cx="106" cy="87" r="3"/><circle cx="101" cy="91" r="2.2"/><circle cx="16" cy="92" r="2.6"/>
+  </g>
+  <!-- feet gripping the perch -->
+  <path d="M44 100 L43.5 104.5 M51 100 L51 104" stroke="#e5a50a" stroke-width="3" stroke-linecap="round"/>
+  <path d="M39.5 106 C41.5 102.5 45.5 102.5 47.5 105.5 M47 105.5 C49 102 53 102 55 105" stroke="#e5a50a" stroke-width="2.6" fill="none" stroke-linecap="round"/>
 </svg>

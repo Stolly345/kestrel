@@ -31,7 +31,11 @@ const CSS: &str = "
 .chip-bar { padding: 4px 10px; border-bottom: 1px solid alpha(currentColor, 0.08); }
 menubutton.chip > button { padding: 2px 10px; min-height: 26px; border-radius: 99px; }
 menubutton.chip.chip-active > button { background: alpha(@accent_bg_color, 0.22); color: @accent_color; }
-.preview-pane { border-left: 1px solid alpha(currentColor, 0.12); }
+.preview-pane { background: var(--sidebar-bg-color); border-left: 1px solid var(--border-color); }
+.preview-header { padding: 0 6px 0 14px; min-height: 46px; border-bottom: 1px solid var(--border-color); }
+.tag-dot.tag-big { min-width: 16px; min-height: 16px; color: white; box-shadow: inset 0 0 0 1px alpha(black, 0.15); }
+button.tag-pick { min-width: 22px; min-height: 22px; padding: 1px; }
+.tag-dot.tag-big.tag-small { min-width: 14px; min-height: 14px; }
 .tag-dot { min-width: 10px; min-height: 10px; border-radius: 99px; }
 .tag-red { background: @red_3; }
 .tag-orange { background: @orange_3; }

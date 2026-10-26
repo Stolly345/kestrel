@@ -157,14 +157,12 @@ fn listbox() -> gtk::ListBox {
         .build()
 }
 
-/// Rows carry their target as the widget name: a URI, or `tag:red` (a search).
+/// Rows carry their target (a URI) as the widget name.
 fn wire(lb: &gtk::ListBox, nav: &Rc<dyn Fn(Loc)>) {
     let nav = nav.clone();
     lb.connect_row_activated(move |_, r| {
         let name = r.widget_name();
-        if name.starts_with("tag:") {
-            nav(Loc::Search(name.to_string()));
-        } else if name.contains(':') {
+        if name.contains(':') {
             nav(Loc::Dir(gio::File::for_uri(&name)));
         }
     });
@@ -218,23 +216,20 @@ impl Sidebar {
         let nav = navigate.clone();
         searches.connect_row_activated(move |_, r| nav(Loc::Search(r.widget_name().trim_start_matches("search:").to_string())));
         let devices = listbox();
-        let tags = listbox();
+        // one row of colour dots: click one to list every file with that tag (an index search)
+        let tags = gtk::Box::builder().spacing(0).margin_start(8).margin_end(8).margin_bottom(4).build();
         for t in kestrel_index::TAGS {
-            let (r, b) = row("tag-symbolic", &format!("{}{}", t[..1].to_uppercase(), &t[1..]));
-            b.first_child().unwrap().set_visible(false);
-            b.prepend(
-                &gtk::Box::builder()
-                    .css_classes(["tag-dot", &format!("tag-{t}")])
-                    .valign(gtk::Align::Center)
-                    .margin_start(3)
-                    .margin_end(3)
-                    .build(),
-            );
-            r.set_widget_name(&format!("tag:{t}"));
-            tags.append(&r);
+            let b = crate::tags::dot_button(t);
+            b.set_tooltip_text(Some(&format!("Files tagged {t}")));
+            let nav = navigate.clone();
+            let q = format!("tag:{t}");
+            b.connect_clicked(move |_| nav(Loc::Search(q.clone())));
+            tags.append(&b);
         }
-        wire(&tags, &navigate);
 
+        // tags first, above Home
+        col.append(&section("Tags"));
+        col.append(&tags);
         col.append(&places);
         col.append(&section("Bookmarks"));
         col.append(&bookmarks);
@@ -242,8 +237,6 @@ impl Sidebar {
         col.append(&searches);
         col.append(&section("Devices"));
         col.append(&devices);
-        col.append(&section("Tags"));
-        col.append(&tags);
         let root = gtk::ScrolledWindow::builder()
             .child(&col)
             .hscrollbar_policy(gtk::PolicyType::Never)

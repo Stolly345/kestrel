@@ -19,6 +19,10 @@ pub struct Settings {
     /// Scope for new tabs: 0 Everywhere, 1 This folder, 2 This folder only
     pub default_scope: u32,
     pub type_to_search: bool,
+    /// Times in file lists: "system" (GNOME's clock setting) | "24h" | "12h"
+    pub clock: String,
+    /// Type column: "full" (Microsoft Excel Worksheet) | "short" (Excel) | "extension" (XLSX)
+    pub type_style: String,
 }
 
 impl Default for Settings {
@@ -30,6 +34,8 @@ impl Default for Settings {
             restore_session: true,
             default_scope: 0,
             type_to_search: true,
+            clock: "system".into(),
+            type_style: "full".into(),
         }
     }
 }
@@ -38,9 +44,27 @@ impl Settings {
     pub fn view(&self) -> Mode {
         Mode::parse(&self.default_view)
     }
+    /// 12-hour times? "system" asks GNOME's clock-format setting.
+    pub fn clock_12h(&self) -> bool {
+        match self.clock.as_str() {
+            "12h" => true,
+            "24h" => false,
+            _ => system_12h(),
+        }
+    }
     pub fn scope(&self) -> Scope {
         Scope::ALL[(self.default_scope as usize).min(2)]
     }
+}
+
+/// GNOME's clock-format (read once; 24-hour if the schema isn't installed).
+fn system_12h() -> bool {
+    static H12: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *H12.get_or_init(|| {
+        let id = "org.gnome.desktop.interface";
+        gio::SettingsSchemaSource::default().and_then(|s| s.lookup(id, true)).is_some()
+            && gio::Settings::new(id).string("clock-format") == "12h"
+    })
 }
 
 fn file() -> PathBuf {
@@ -55,6 +79,22 @@ thread_local! {
 
 pub fn get() -> Settings {
     SETTINGS.with_borrow(|s| s.clone())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TypeStyle {
+    Full,
+    Short,
+    Extension,
+}
+
+/// The Type column style, without cloning all settings (called per row and per sort comparison).
+pub fn type_style() -> TypeStyle {
+    SETTINGS.with_borrow(|s| match s.type_style.as_str() {
+        "short" => TypeStyle::Short,
+        "extension" => TypeStyle::Extension,
+        _ => TypeStyle::Full,
+    })
 }
 
 /// Change, persist, and apply what applies globally (colour scheme).
@@ -145,6 +185,19 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, toa
     );
     scheme.connect_selected_notify(move |r| update(|s| s.color_scheme = schemes[r.selected().min(2) as usize].into()));
     look.add(&scheme);
+    let clocks = ["system", "24h", "12h"];
+    let clock = combo(
+        "Time format",
+        "For Modified times in file lists",
+        &[if system_12h() { "Follow System (12-hour)" } else { "Follow System (24-hour)" }, "24-hour", "12-hour"],
+        clocks.iter().position(|x| *x == s.clock).unwrap_or(0) as u32,
+    );
+    let oc = on_change.clone();
+    clock.connect_selected_notify(move |r| {
+        update(|s| s.clock = clocks[r.selected().min(2) as usize].into());
+        oc();
+    });
+    look.add(&clock);
     page.add(&look);
 
     let browse = adw::PreferencesGroup::builder().title("Browsing").build();
@@ -167,6 +220,19 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, toa
     let restore = switch("Reopen tabs at start", "Pick up where you left off", s.restore_session);
     restore.connect_active_notify(|r| update(|s| s.restore_session = r.is_active()));
     browse.add(&restore);
+    let styles = ["full", "short", "extension"];
+    let types = combo(
+        "File type names",
+        "Full: Microsoft Excel Worksheet · Short: Excel · Extension: XLSX",
+        &["Full", "Short", "Extension"],
+        styles.iter().position(|x| *x == s.type_style).unwrap_or(0) as u32,
+    );
+    let oc = on_change.clone();
+    types.connect_selected_notify(move |r| {
+        update(|s| s.type_style = styles[r.selected().min(2) as usize].into());
+        oc();
+    });
+    browse.add(&types);
     page.add(&browse);
 
     let search = adw::PreferencesGroup::builder().title("Search").build();

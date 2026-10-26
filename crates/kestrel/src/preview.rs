@@ -7,7 +7,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 pub struct Preview {
-    pub root: gtk::ScrolledWindow,
+    pub root: gtk::Box,
     body: gtk::Box,
     /// Bumped on every show(); late async results for an older selection are dropped.
     serial: std::rc::Rc<std::cell::Cell<u64>>,
@@ -271,13 +271,34 @@ impl Preview {
             .margin_top(16)
             .margin_bottom(16)
             .build();
-        let root = gtk::ScrolledWindow::builder()
+        let scroller = gtk::ScrolledWindow::builder()
             .child(&body)
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .build();
+        // its own titled panel (sidebar shade, border, header) so it never reads as part of the file list
+        let header = gtk::CenterBox::builder()
+            .start_widget(&gtk::Label::builder().label("Preview").css_classes(["heading"]).build())
+            .end_widget(
+                &gtk::Button::builder()
+                    .icon_name("window-close-symbolic")
+                    .css_classes(["flat", "circular"])
+                    .tooltip_text("Close Preview (Alt+P)")
+                    .action_name("win.preview")
+                    .valign(gtk::Align::Center)
+                    .build(),
+            )
+            .css_classes(["preview-header"])
+            .build();
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
             .width_request(260)
             .visible(false)
+            .css_classes(["preview-pane"])
             .build();
-        root.add_css_class("preview-pane");
+        root.append(&header);
+        root.append(&scroller);
+        crate::label_icon_buttons(root.upcast_ref());
         Preview {
             root,
             body,
@@ -447,6 +468,23 @@ impl Preview {
                 .selectable(true)
                 .build(),
         );
+        if file.is_native() && !is_dir {
+            // tag dots act on the previewed file itself (not "the selection", which a click on
+            // the list or a refresh may have changed)
+            let picker = std::rc::Rc::new(std::cell::OnceCell::<gtk::Box>::new());
+            let (p, f) = (picker.clone(), file.clone());
+            let row = crate::tags::picker(move |t| {
+                if let Err(e) = crate::tags::toggle(std::slice::from_ref(&f), t) {
+                    eprintln!("kestrel: tagging failed: {e}");
+                }
+                if let Some(row) = p.get() {
+                    crate::tags::set_picker(row, crate::tags::read(&f));
+                }
+            });
+            crate::tags::set_picker(&row, crate::tags::of_info(info));
+            let _ = picker.set(row.clone());
+            self.body.append(&row);
+        }
 
         let grid = gtk::Grid::builder().column_spacing(12).row_spacing(6).build();
         let desc = gio::content_type_get_description(&ct);
@@ -467,8 +505,6 @@ impl Preview {
             row(&grid, 4, "Permissions", &perms(info.attribute_uint32("unix::mode")));
         }
         row(&grid, 5, "Owner", info.attribute_string("owner::user").as_deref().unwrap_or(""));
-        let tags = crate::tags::names(crate::tags::of_info(info)).collect::<Vec<_>>().join(", ");
-        row(&grid, 6, "Tags", &tags);
         let git_s = match git {
             Some('M') => "Modified",
             Some('A') => "Added",
