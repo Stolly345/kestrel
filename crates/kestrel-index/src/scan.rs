@@ -26,7 +26,11 @@ fn excluded(p: &Path, excludes: &[PathBuf]) -> bool {
 }
 
 /// Mount points of local disk filesystems, one per device (bind mounts dropped), sorted.
+/// KESTREL_ROOT replaces them with one folder: a small index for tests (scripts/ui-check.sh).
 pub fn local_mounts(excludes: &[PathBuf]) -> Vec<PathBuf> {
+    if let Some(r) = std::env::var_os("KESTREL_ROOT") {
+        return vec![PathBuf::from(r)];
+    }
     let text = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
     let mut by_dev: HashMap<u64, PathBuf> = HashMap::new();
     for line in text.lines() {

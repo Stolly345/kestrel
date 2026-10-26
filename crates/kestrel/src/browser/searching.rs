@@ -121,8 +121,8 @@ impl Browser {
                 Err(SearchError::Down(e)) => {
                     b.show_status(
                         "network-offline-symbolic",
-                        "Search service not running",
-                        "Start kestrel-indexd from the banner above, or run: sudo systemctl start kestrel-indexd",
+                        "Search is off",
+                        "Kestrel's search service isn't running. Press Start Service above to turn it on.",
                     );
                     *b.search_state.borrow_mut() = SearchState::Down(e);
                 }

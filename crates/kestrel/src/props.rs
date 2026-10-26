@@ -117,7 +117,7 @@ fn checksums(path: std::path::PathBuf) -> adw::PreferencesGroup {
                         calc.set_visible(false);
                         check();
                     }
-                    Ok(Err(e)) => calc.set_label(&e.to_string()),
+                    Ok(Err(e)) => calc.set_label(&crate::browser::human_io(&e)),
                     Err(_) => calc.set_label("Failed"),
                 }
             });
@@ -229,7 +229,7 @@ fn build(parent: &gtk::Widget, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) +
                         glib::spawn_future_local(async move {
                             let r = gio::spawn_blocking(move || {
                                 f2.set_attribute_uint32("unix::mode", m, gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
-                                    .map_err(|e| e.message().to_string())
+                                    .map_err(|e| crate::browser::human_gio(&e))
                             })
                             .await;
                             if let Ok(Err(e)) = r {

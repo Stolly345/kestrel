@@ -117,14 +117,14 @@ fn rename_all(jobs: Vec<(gio::File, String)>) -> (Vec<(gio::File, gio::File)>, O
                     done.push((f, t.clone()));
                     pending.push((t, n));
                 }
-                Err(e) => return (done, Some(e.message().to_string())),
+                Err(e) => return (done, Some(crate::browser::human_gio(&e))),
             }
             continue;
         };
         let (f, n) = pending.remove(i);
         match f.set_display_name(&n, gio::Cancellable::NONE) {
             Ok(new) => done.push((f, new)),
-            Err(e) => return (done, Some(format!("{n}: {}", e.message()))),
+            Err(e) => return (done, Some(format!("{n}: {}", crate::browser::human_gio(&e)))),
         }
     }
     (done, None)

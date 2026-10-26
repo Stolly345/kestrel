@@ -209,10 +209,11 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   Extract produces. Samples live in `crates/kestrel/tests/fixtures/archives/` and are built by
   `scripts/make-archive-fixtures.sh`; a new extension fails the test until it has one.
   Per-format report: `cargo test -p kestrel every_format -- --nocapture`.
-- **`scripts/ui-check.sh`** drives the real app through 23 screens under a virtual display
-  (views, previews, dialogs, batch rename, terminal, Extract and its conflict prompt, Trash) with
-  a throwaway home folder, checks 4 results along the way, and saves every screen to
-  `target/ui-check/`.
+- **`scripts/ui-check.sh`** drives the real app through 30 screens under a virtual display
+  (views, previews, dialogs, batch rename, terminal, search and its empty/off states, a folder
+  you can't open, Extract and its conflict prompt, Trash) with a throwaway home folder and its
+  own small search service, checks 5 results along the way, fails on any GTK warning or error
+  page, and saves every screen to `target/ui-check/`.
 - **`scripts/smoke-live.sh`** (run as yourself; it uses sudo only for a test service) checks live
   updates, permission filtering, excluded folders, and drives mounting and unmounting. Run it
   after any change to `kestrel-indexd` or `kestrel-index`.

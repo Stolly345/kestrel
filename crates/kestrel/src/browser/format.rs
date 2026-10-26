@@ -2,6 +2,49 @@
 
 use super::*;
 
+/// A GIO error in plain words for the screen; uncommon ones keep GIO's own text.
+pub fn human_gio(e: &glib::Error) -> String {
+    use gio::IOErrorEnum as E;
+    let plain = match e.kind::<E>() {
+        Some(E::PermissionDenied) => "You don't have permission",
+        Some(E::NoSpace) => "The disk is full",
+        Some(E::NotFound) => "It isn't there any more",
+        Some(E::Exists) => "Something with that name already exists",
+        Some(E::NotMounted) => "That drive or share isn't connected",
+        Some(E::ReadOnly) => "This drive is read-only",
+        Some(E::Busy) => "Another program is using it",
+        Some(E::NotEmpty) => "The folder isn't empty",
+        Some(E::FilenameTooLong) => "The name is too long",
+        Some(E::InvalidFilename) => "Names can't contain \u{201c}/\u{201d}",
+        Some(E::WouldRecurse) => "A folder can't go inside itself",
+        Some(E::TimedOut) | Some(E::HostNotFound) | Some(E::HostUnreachable) | Some(E::ConnectionRefused) | Some(E::NetworkUnreachable) => {
+            "The server didn't answer"
+        }
+        Some(E::NotSupported) => "That isn't possible on this drive",
+        Some(E::Cancelled) => "Cancelled",
+        _ => return e.message().to_string(),
+    };
+    plain.into()
+}
+
+/// The same for errors from std::fs: "Permission denied (os error 13)" reads like a crash.
+pub fn human_io(e: &std::io::Error) -> String {
+    use std::io::ErrorKind as K;
+    match e.kind() {
+        K::PermissionDenied => "You don't have permission".into(),
+        K::NotFound => "It isn't there any more".into(),
+        K::AlreadyExists => "Something with that name already exists".into(),
+        K::StorageFull => "The disk is full".into(),
+        K::ReadOnlyFilesystem => "This drive is read-only".into(),
+        K::DirectoryNotEmpty => "The folder isn't empty".into(),
+        K::ResourceBusy => "Another program is using it".into(),
+        _ => {
+            let t = e.to_string();
+            t.split(" (os error").next().unwrap_or(&t).to_string()
+        }
+    }
+}
+
 pub fn info_file(info: &gio::FileInfo) -> Option<gio::File> {
     info.attribute_object("standard::file").and_downcast()
 }
@@ -142,5 +185,21 @@ pub fn as_location(t: &str) -> Option<gio::File> {
         gio::FileType::Unknown => None,
         gio::FileType::Directory => Some(f),
         _ => f.parent(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_read_as_sentences() {
+        assert_eq!(human_io(&std::io::Error::from_raw_os_error(13)), "You don't have permission");
+        // uncommon errors keep their text, minus the errno noise
+        assert_eq!(human_io(&std::io::Error::from_raw_os_error(71)), "Protocol error");
+        let e = glib::Error::new(gio::IOErrorEnum::NotMounted, "The specified location is not mounted");
+        assert_eq!(human_gio(&e), "That drive or share isn't connected");
+        let e = glib::Error::new(gio::IOErrorEnum::Failed, "Something odd");
+        assert_eq!(human_gio(&e), "Something odd");
     }
 }

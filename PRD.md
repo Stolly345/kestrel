@@ -421,6 +421,14 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.16 (2026-10-26): plain-words errors, search in the UI check.** Every error that reaches the
+  screen goes through `browser::human_gio`/`human_io` ("You don't have permission", "The disk is full",
+  "That drive or share isn't connected"; uncommon ones keep GIO's text, minus "(os error N)"); trash on a
+  drive without one says to use Delete (Shift+Delete). Search-off state reworded ("Search is off", no daemon
+  name, systemctl line or socket path). ui-check.sh runs its own index service as the user
+  (`--no-watch`, new `KESTREL_ROOT` = one folder) and adds 7 screens: search, type ranking, picture filter
+  in grid, content search, no results, service down, a folder you can't open (OK_ERR lets a scenario
+  expect an error page). 35/35.
 - **v0.9.15 (2026-10-26): review fixes.** (1) Index service: caller groups from SO_PEERGROUPS at connect time (was
   /proc/<pid>/status, a pid-reuse race); per-uid (32) and total (256) connection caps, 64 KB request lines (also
   for --http); unit gets MemoryHigh=1G, MemoryMax=3G, TasksMax=256; `content:` opens files with the caller's

@@ -306,7 +306,7 @@ impl Win {
             debounce: RefCell::default(),
         };
         let banner = adw::Banner::builder()
-            .title("The search service (kestrel-indexd) isn't running, so search results are unavailable.")
+            .title("Search is off: the search service isn't running.")
             .button_label("Start Service")
             .revealed(false)
             .build();

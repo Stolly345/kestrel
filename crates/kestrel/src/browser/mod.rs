@@ -1082,7 +1082,7 @@ impl Browser {
                 {
                     let op = gtk::MountOperation::new(b.root.root().and_downcast::<gtk::Window>().as_ref());
                     if let Err(e) = f.mount_enclosing_volume_future(gio::MountMountFlags::NONE, Some(&op)).await {
-                        b.show_status("dialog-error-symbolic", "Couldn't connect", e.message());
+                        b.show_status("dialog-error-symbolic", "Couldn't connect", &human_gio(&e));
                         return;
                     }
                 }
@@ -1144,7 +1144,7 @@ impl Browser {
             self.apply_pending_select();
         }
         if let Some(e) = self.dirlist.error() {
-            self.show_status("dialog-error-symbolic", "Can't open this folder", e.message());
+            self.show_status("dialog-error-symbolic", "Can't open this folder", &human_gio(&e));
         } else if self.dir_sel.n_items() == 0 && !self.dirlist.is_loading() && self.mode.get() != Mode::Columns {
             self.show_status("folder-symbolic", "Folder is empty", "");
         } else {
@@ -1382,7 +1382,7 @@ impl Browser {
             if let Err(e) = r
                 && !e.matches(gtk::DialogError::Dismissed)
             {
-                ops.toast(e.message());
+                ops.toast(&human_gio(&e));
             }
         });
     }

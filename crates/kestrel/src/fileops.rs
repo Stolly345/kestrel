@@ -160,7 +160,10 @@ fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &
                 Conflict::Skip => continue,
                 Conflict::Replace => {
                     if let Err(e) = target.trash(gio::Cancellable::NONE) {
-                        failed.push(format!("{name}: couldn't move the existing one to the trash ({})", e.message()));
+                        failed.push(format!(
+                            "{name}: couldn't move the existing one to the trash ({})",
+                            crate::browser::human_gio(&e)
+                        ));
                         continue;
                     }
                     replaced.extend(target.path());
@@ -183,7 +186,7 @@ fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &
         };
         match r {
             Ok(()) => done.push((src.clone(), dst)),
-            Err(e) => failed.push(format!("{name}: {}", e.message())),
+            Err(e) => failed.push(format!("{name}: {}", crate::browser::human_gio(&e))),
         }
     }
     Transferred { pairs: done, replaced, failed }
@@ -218,7 +221,7 @@ fn restore_items(items: &[PathBuf]) -> Result<usize, String> {
     for item in items {
         let orig = trash_origin(item).ok_or_else(|| format!("{}: no record of where it came from", item.display()))?;
         let dir = orig.parent().ok_or("bad original path")?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {}", dir.display(), crate::browser::human_io(&e)))?;
         let name = orig.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let dest = unique_child(&gio::File::for_path(dir), &name);
         gio::File::for_path(item)
@@ -228,7 +231,7 @@ fn restore_items(items: &[PathBuf]) -> Result<usize, String> {
                 gio::Cancellable::NONE,
                 None,
             )
-            .map_err(|e| format!("{name}: {}", e.message()))?;
+            .map_err(|e| format!("{name}: {}", crate::browser::human_gio(&e)))?;
         let _ = std::fs::remove_file(trashinfo(item));
         n += 1;
     }
@@ -299,7 +302,7 @@ fn restore_from_home_trash(origs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
         if orig.symlink_metadata().is_ok() {
             return Err(format!("{} already exists", orig.display()));
         }
-        std::fs::rename(trash.join("files").join(stem), orig).map_err(|e| format!("{}: {e}", orig.display()))?;
+        std::fs::rename(trash.join("files").join(stem), orig).map_err(|e| format!("{}: {}", orig.display(), crate::browser::human_io(&e)))?;
         let _ = std::fs::remove_file(trash.join("info").join(format!("{stem}.trashinfo")));
     }
     Ok(rest)
@@ -316,7 +319,7 @@ fn restore_from_trash(origs: &[PathBuf]) -> Result<(), String> {
     let trash = gio::File::for_uri("trash:///");
     let e = trash
         .enumerate_children("standard::name,trash::orig-path,trash::deletion-date", NOFOLLOW, gio::Cancellable::NONE)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::browser::human_gio(&e))?;
     // orig path -> (deletion date, name in trash); ISO-8601 dates sort as strings
     let mut newest: std::collections::HashMap<PathBuf, (String, PathBuf)> = Default::default();
     while let Ok(Some(info)) = e.next_file(gio::Cancellable::NONE) {
@@ -345,7 +348,7 @@ fn restore_from_trash(origs: &[PathBuf]) -> Result<(), String> {
         trash
             .child(name)
             .move_(&dest, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| crate::browser::human_gio(&e))?;
     }
     if missing.is_empty() {
         Ok(())
@@ -355,7 +358,7 @@ fn restore_from_trash(origs: &[PathBuf]) -> Result<(), String> {
 }
 
 fn run_undo(u: Undo) -> Result<String, String> {
-    let err = |e: glib::Error| e.message().to_string();
+    let err = |e: glib::Error| crate::browser::human_gio(&e);
     match u {
         Undo::Moved(pairs) => {
             for (src, dst) in pairs.iter().rev() {
@@ -686,7 +689,10 @@ impl Ops {
                 for f in &files {
                     match f.trash(gio::Cancellable::NONE) {
                         Ok(()) => done.extend(f.path()),
-                        Err(e) => return Err((done, e.message().to_string())),
+                        Err(e) if e.matches(gio::IOErrorEnum::NotSupported) => {
+                            return Err((done, "this drive has no trash; use Delete (Shift+Delete) instead".into()));
+                        }
+                        Err(e) => return Err((done, crate::browser::human_gio(&e))),
                     }
                 }
                 Ok(done)
@@ -727,7 +733,7 @@ impl Ops {
                 format!("Deleting {}", plural(files.len(), "item")),
                 move |_| {
                     for f in &files {
-                        delete_tree(f).map_err(|e| e.message().to_string())?;
+                        delete_tree(f).map_err(|e| crate::browser::human_gio(&e))?;
                         // deleting from the trash: drop its .trashinfo too
                         if in_home_trash(f)
                             && let Some(p) = f.path()
@@ -786,7 +792,7 @@ impl Ops {
                             } else {
                                 std::fs::remove_file(&p)
                             };
-                            r.map_err(|err| format!("{}: {err}", p.display()))?;
+                            r.map_err(|e| format!("{}: {}", p.display(), crate::browser::human_io(&e)))?;
                             n += usize::from(sub == "files");
                         }
                     }
@@ -856,7 +862,7 @@ impl Ops {
                 }
                 file.set_display_name(&name, gio::Cancellable::NONE)
                     .map(|new| (file, new))
-                    .map_err(|e| e.message().to_string())
+                    .map_err(|e| crate::browser::human_gio(&e))
             },
             |me, r| match r {
                 Ok((old, new)) => me.undo.borrow_mut().push(Undo::Renamed(old, new)),
@@ -870,7 +876,7 @@ impl Ops {
         self.ask_name("New Folder", "Create", "New Folder", move |name| {
             let f = dir.child(&name);
             me.bg(
-                move || f.make_directory(gio::Cancellable::NONE).map(|_| f).map_err(|e| e.message().to_string()),
+                move || f.make_directory(gio::Cancellable::NONE).map(|_| f).map_err(|e| crate::browser::human_gio(&e)),
                 |me, r| match r {
                     Ok(f) => me.undo.borrow_mut().push(Undo::Created(f)),
                     Err(e) => me.toast(&e),
@@ -946,7 +952,7 @@ impl Ops {
         self.job(
             format!("Extracting {name}"),
             move |p| -> Result<Unpacked, ExtractErr> {
-                let other = |e: std::io::Error| ExtractErr::Other(e.to_string());
+                let other = |e: std::io::Error| ExtractErr::Other(crate::browser::human_io(&e));
                 let tmp = unique_child(&dir2, &tmp_name);
                 let tpath = tmp.path().ok_or(ExtractErr::Other("no path".into()))?;
                 std::fs::create_dir(&tpath).map_err(other)?;
@@ -1014,7 +1020,9 @@ impl Ops {
                             return Ok(None);
                         }
                         Conflict::Replace => {
-                            target.trash(gio::Cancellable::NONE).map_err(|e| format!("{}: {}", u.name, e.message()))?;
+                            target
+                                .trash(gio::Cancellable::NONE)
+                                .map_err(|e| format!("{}: {}", u.name, crate::browser::human_gio(&e)))?;
                             replaced = target.path();
                             target
                         }
@@ -1023,7 +1031,7 @@ impl Ops {
                 let r = u.src.move_(&dest, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None);
                 // the staging folder is gone if it was moved itself; otherwise it holds nothing we want
                 let _ = std::fs::remove_dir_all(&u.tmp);
-                r.map_err(|e| e.message().to_string())?;
+                r.map_err(|e| crate::browser::human_gio(&e))?;
                 Ok(Some((dest, replaced)))
             },
             move |me, r| match r {

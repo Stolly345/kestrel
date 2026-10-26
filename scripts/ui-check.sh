@@ -7,14 +7,14 @@
 #   scripts/ui-check.sh            # all scenarios
 #   scripts/ui-check.sh preview    # only scenarios whose name contains "preview"
 #
-# Needs: xvfb (xvfb-run), dbus-run-session; run as yourself. Search scenarios need the index
-# service and are left out: everything here works on the demo folder alone.
+# Needs: xvfb (xvfb-run), dbus-run-session; run as yourself. Search scenarios run their own index
+# service as you (--no-watch, KESTREL_ROOT = the demo folder), not the system one.
 set -u
 cd "$(dirname "$0")/.."
 root=$PWD
 only=${1:-}
 command -v xvfb-run >/dev/null || { echo "needs xvfb: sudo apt install xvfb"; exit 1; }
-cargo build --release -q -p kestrel || exit 1
+cargo build --release -q -p kestrel -p kestrel-indexd || exit 1
 bin=$root/target/release/kestrel
 out=$root/target/ui-check
 rm -rf "$out" && mkdir -p "$out"
@@ -23,7 +23,7 @@ rm -rf "$out" && mkdir -p "$out"
 H=$(mktemp -d /tmp/kestrel-ui.XXXXXX)
 # runtime dir outside the home: GIO shows FUSE mounts under $HOME (gvfs, doc) as drives
 R=$(mktemp -d /tmp/kestrel-ui-run.XXXXXX)
-trap 'rm -rf "$H" "$R"' EXIT
+trap 'kill $IXD 2>/dev/null; chmod 700 "$H/Demo/locked" 2>/dev/null; rm -rf "$H" "$R"' EXIT
 D=$H/Demo
 mkdir -p "$D/Projects/aurora/src" "$H/.config/gtk-4.0" "$H/.local/share/nautilus/scripts"
 printf '[Settings]\ngtk-enable-animations=false\n' >"$H/.config/gtk-4.0/settings.ini"
@@ -33,6 +33,7 @@ printf '# Aurora\n\nA tiny **weather station** dashboard.\n\n- Reads sensors eve
 printf 'fn main() {\n    println!("aurora");\n}\n' >"$D/Projects/aurora/src/main.rs"
 for n in "IMG_0001.txt" "IMG_0002.txt" "IMG_0003.txt"; do echo "$n" >"$D/$n"; done
 ln -s Projects/aurora "$D/aurora-link"
+mkdir "$D/locked" && chmod 000 "$D/locked"
 printf '#!/bin/sh\necho "$@" > /dev/null\n' >"$H/.local/share/nautilus/scripts/Count lines" && chmod +x "$H/.local/share/nautilus/scripts/Count lines"
 python3 -I - "$D" <<'PY'
 import struct, sys, zlib
@@ -65,6 +66,13 @@ export HOME=$H XDG_RUNTIME_DIR=$R GDK_BACKEND=x11 GDK_DEBUG=no-portals KESTREL_7
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 pass=0 fails=()
 
+# the index service, over the demo folder only; static (no fanotify), so search scenarios come
+# before anything that changes files
+export KESTREL_SOCK=$R/kestrel.sock
+KESTREL_ROOT=$D KESTREL_STATE=$R/index.bin "$root/target/release/kestrel-indexd" --no-watch 2>"$out/indexd.log" &
+IXD=$!
+for _ in $(seq 50); do grep -q indexed "$out/indexd.log" && break; sleep 0.2; done
+
 # shot NAME [kestrel args…]: open the app, run, save target/ui-check/NAME.png (+ .dialog.png)
 shot() {
     local name=$1
@@ -79,7 +87,10 @@ shot() {
     local why=
     [ $rc -ne 0 ] && why="exit code $rc"
     [ -s "$out/$name.png" ] || why="${why:+$why, }no screenshot"
-    grep -qE "panicked|CRITICAL|folder error|action [a-z-]+: " "$log" && why="${why:+$why, }$(grep -m1 -E 'panicked|CRITICAL|folder error|action [a-z-]+: ' "$log")"
+    # OK_ERR=PATTERN: a scenario that's meant to show an error
+    local bad
+    bad=$(grep -E "panicked|CRITICAL|folder error|action [a-z-]+: " "$log" | grep -vE "${OK_ERR:-^\$}" | head -1)
+    [ -n "$bad" ] && why="${why:+$why, }$bad"
     if [ -z "$why" ]; then
         echo "ok   $name"
         pass=$((pass + 1))
@@ -115,6 +126,15 @@ shot preferences "$D" --action preferences
 shot search-syntax "$D" --action syntax
 shot terminal-panel "$D/Projects" --action terminal-panel
 shot browse-archive "$D" --select sample.zip --action browse-archive
+shot search --search IMG
+shot search-type --search pdf
+shot search-grid --search pic: --mode grid
+shot search-content --search content:weather
+shot search-none --search zzqqxx
+KESTREL_SOCK=$R/nobody.sock shot search-service-down --search IMG
+if OK_ERR="folder error" shot no-permission "$D/locked"; then
+    expect no-permission "says why in plain words" grep -q "Can't open this folder: You don't have permission" "$out/no-permission.log"
+fi
 if shot extract "$D" --select sample.zip --action extract; then
     expect extract "sample/hello.txt extracted" test -f "$D/sample/hello.txt"
     if shot extract-conflict "$D" --select sample.zip --action extract; then

@@ -78,7 +78,7 @@ fn ask(conn: &Mutex<Option<Conn>>, req: &Request) -> Result<Response, SearchErro
             Err(_) => *c = None,
         }
     }
-    Err(SearchError::Down(format!("Can't reach the search service at {}.", socket_path())))
+    Err(SearchError::Down("The search service isn't running.".to_string()))
 }
 
 #[derive(Debug, Clone)]
