@@ -20,6 +20,23 @@ use std::time::Instant;
 const EXCLUDES_FILE: &str = "/etc/kestrel/excludes";
 /// systemd's StateDirectory=kestrel (0700, root). KESTREL_STATE overrides it for testing.
 const STATE_FILE: &str = "/var/lib/kestrel/index.bin";
+/// Any local user may connect: bound what one of them can make root hold.
+const MAX_PER_USER: usize = 32;
+const MAX_CLIENTS: usize = 256;
+/// A request is a query and a few flags; nothing legitimate comes close.
+pub const MAX_LINE: u64 = 64 * 1024;
+
+/// One line, at most MAX_LINE bytes; Err(InvalidData) if longer (the connection is then dropped).
+pub fn read_line_limited(r: &mut impl BufRead, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+    use std::io::Read;
+    buf.clear();
+    let n = r.take(MAX_LINE + 1).read_until(b'\n', buf)?;
+    if n as u64 > MAX_LINE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request too long"));
+    }
+    Ok(n)
+}
+
 /// Save at most this often while files keep changing (plus always on shutdown).
 const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
@@ -199,7 +216,16 @@ fn lost_rescan_gap() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+/// Swap in a full rescan, then reconcile drives: the scan only saw what was mounted when it began,
+/// so a drive unplugged meanwhile would come back and one plugged in meanwhile would vanish.
+fn install(fresh: Index, fan: &mut fan::Fan, ix: &RwLock<Index>, excludes: &[PathBuf]) {
+    *ix.write().unwrap() = fresh;
+    sync_mounts(fan, ix, excludes);
+}
+
 fn watch_loop(mut fan: fan::Fan, ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<std::sync::atomic::AtomicU64>) {
+    // the first scan ran before this loop: catch drives that came or went during it
+    sync_mounts(&mut fan, &ix, &excludes);
     // /proc/self/mounts signals POLLPRI whenever something is mounted or unmounted
     let mounts = std::fs::File::open("/proc/self/mounts").ok();
     let mut last_rescan = Instant::now();
@@ -210,7 +236,7 @@ fn watch_loop(mut fan: fan::Fan, ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>,
         if repair_pending && last_rescan.elapsed() >= gap {
             log("rescanning to pick up changes whose events were lost");
             let fresh = rescan(&excludes);
-            *ix.write().unwrap() = fresh;
+            install(fresh, &mut fan, &ix, &excludes);
             changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             (last_rescan, repair_pending) = (Instant::now(), false);
         }
@@ -270,7 +296,7 @@ fn watch_loop(mut fan: fan::Fan, ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>,
             log(if overflow { "event queue overflow, rescanning" } else { "compacting" });
             // queries keep using the old index while this runs; events queue in the kernel and replay after
             let fresh = rescan(&excludes);
-            *ix.write().unwrap() = fresh;
+            install(fresh, &mut fan, &ix, &excludes);
             // a full rescan also covers anything lost so far
             (last_rescan, repair_pending) = (Instant::now(), false);
         }
@@ -290,17 +316,37 @@ fn serve(ix: Arc<RwLock<Index>>) {
     // anyone may connect; results are filtered by the caller's credentials
     let _ = std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o666));
     log(format_args!("listening on {}", sock.display()));
+    // open connections per uid; one user can't take every slot from the others
+    let open: Arc<std::sync::Mutex<HashMap<u32, usize>>> = Arc::default();
     for conn in listener.incoming().flatten() {
-        let ix = ix.clone();
+        let Some(cred) = peer_cred(&conn) else { continue };
+        let uid = cred.uid;
+        {
+            let mut o = open.lock().unwrap();
+            let total: usize = o.values().sum();
+            let mine = o.entry(uid).or_default();
+            if *mine >= MAX_PER_USER || total >= MAX_CLIENTS {
+                continue; // dropping `conn` closes it; the client sees EOF and can retry
+            }
+            *mine += 1;
+        }
+        let (ix, open) = (ix.clone(), open.clone());
         std::thread::spawn(move || {
-            if let Some(cred) = peer_cred(&conn) {
-                let _ = handle(conn, &ix, &cred);
+            let _ = handle(conn, &ix, &cred);
+            let mut o = open.lock().unwrap();
+            if let Some(n) = o.get_mut(&uid) {
+                *n -= 1;
+                if *n == 0 {
+                    o.remove(&uid);
+                }
             }
         });
     }
 }
 
-/// uid from SO_PEERCRED, supplementary groups from /proc/<pid>/status.
+/// uid and gid from SO_PEERCRED, supplementary groups from SO_PEERGROUPS: both are the
+/// credentials the peer had when it connected, captured by the kernel (looking them up by pid
+/// in /proc raced with that pid exiting and being reused).
 fn peer_cred(s: &UnixStream) -> Option<Cred> {
     let mut uc: libc::ucred = unsafe { std::mem::zeroed() };
     let mut len = size_of::<libc::ucred>() as libc::socklen_t;
@@ -316,22 +362,41 @@ fn peer_cred(s: &UnixStream) -> Option<Cred> {
     if r != 0 {
         return None;
     }
-    let status = std::fs::read_to_string(format!("/proc/{}/status", uc.pid)).ok()?;
-    let mut gids: Vec<u32> = status
-        .lines()
-        .find_map(|l| l.strip_prefix("Groups:"))
-        .map(|g| g.split_whitespace().filter_map(|n| n.parse().ok()).collect())
-        .unwrap_or_default();
-    gids.push(uc.gid);
+    // primary gid first: read_as_caller uses it as the fsgid
+    let mut gids = vec![uc.gid];
+    gids.extend(peer_groups(s)?);
     Some(Cred { uid: uc.uid, gids })
 }
+
+/// SO_PEERGROUPS (Linux 4.13+): the peer's supplementary groups. ERANGE means the buffer was too
+/// small, with the needed size in `len`.
+fn peer_groups(s: &UnixStream) -> Option<Vec<u32>> {
+    const SO_PEERGROUPS: libc::c_int = 59;
+    let mut groups = vec![0u32; 64];
+    loop {
+        let mut len = (groups.len() * size_of::<u32>()) as libc::socklen_t;
+        let r = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_SOCKET, SO_PEERGROUPS, groups.as_mut_ptr().cast(), &mut len) };
+        if r == 0 {
+            groups.truncate(len as usize / size_of::<u32>());
+            return Some(groups);
+        }
+        if std::io::Error::last_os_error().raw_os_error() != Some(libc::ERANGE) || len as usize <= groups.len() * size_of::<u32>() {
+            return None;
+        }
+        groups.resize(len as usize / size_of::<u32>(), 0);
+    }
+}
+
+/// (query, sort, descending, index epoch): a later page may reuse the hits only if all match.
+type PageKey = (String, Sort, bool, u64);
 
 fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<()> {
     let mut out = conn.try_clone()?;
     // last result on this connection, for paging: (query, sort, desc, epoch) -> hits
-    let mut cache: Option<((String, Sort, bool, u64), Vec<u32>)> = None;
-    for line in BufReader::new(conn).lines() {
-        let resp = match serde_json::from_str::<Request>(&line?) {
+    let mut cache: Option<(PageKey, Vec<u32>)> = None;
+    let (mut r, mut line) = (BufReader::new(conn), Vec::new());
+    while read_line_limited(&mut r, &mut line)? > 0 {
+        let resp = match serde_json::from_slice::<Request>(&line) {
             Err(e) => Response {
                 error: Some(format!("bad request: {e}")),
                 ..Default::default()
@@ -386,4 +451,36 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
         out.write_all(b"\n")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_lines_are_bounded() {
+        let mut buf = Vec::new();
+        let mut ok = std::io::Cursor::new(b"{\"q\":\"x\"}\nnext\n".to_vec());
+        assert_eq!(read_line_limited(&mut ok, &mut buf).unwrap(), 10);
+        assert_eq!(read_line_limited(&mut ok, &mut buf).unwrap(), 5);
+        assert_eq!(read_line_limited(&mut ok, &mut buf).unwrap(), 0);
+        let mut huge = std::io::Cursor::new(vec![b'a'; MAX_LINE as usize + 10]);
+        assert_eq!(read_line_limited(&mut huge, &mut buf).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert!(buf.len() as u64 <= MAX_LINE + 1, "never buffers past the limit");
+    }
+
+    #[test]
+    fn peer_credentials_come_from_the_kernel() {
+        let (a, _b) = UnixStream::pair().unwrap();
+        let c = peer_cred(&a).unwrap();
+        let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+        assert_eq!((c.uid, c.gids[0]), (uid, gid), "uid and primary gid first");
+        let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+        let mut mine = vec![0; n as usize];
+        unsafe { libc::getgroups(n, mine.as_mut_ptr()) };
+        let mut got = c.gids[1..].to_vec();
+        got.sort();
+        mine.sort();
+        assert_eq!(got, mine, "supplementary groups via SO_PEERGROUPS");
+    }
 }

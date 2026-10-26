@@ -134,7 +134,31 @@ fn checksums(path: std::path::PathBuf) -> adw::PreferencesGroup {
     g
 }
 
+/// Open Properties. One item is re-queried for the times/owner/permissions the listing didn't
+/// ask for, off the GTK thread (a stalled network mount must not freeze the window).
 pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) + 'static) {
+    let parent = parent.as_ref().clone();
+    let [one] = infos.as_slice() else {
+        build(&parent, infos, toast);
+        return;
+    };
+    let Some(f) = info_file(one) else { return };
+    let one = one.clone();
+    glib::spawn_future_local(async move {
+        let info = f
+            .query_info_future(
+                &format!("{ATTRS},time::*,owner::*,unix::*,access::*"),
+                gio::FileQueryInfoFlags::NONE,
+                glib::Priority::DEFAULT,
+            )
+            .await
+            .unwrap_or(one);
+        info.set_attribute_object("standard::file", &f);
+        build(&parent, vec![info], toast);
+    });
+}
+
+fn build(parent: &gtk::Widget, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) + 'static) {
     let page = adw::PreferencesPage::new();
     let g = adw::PreferencesGroup::new();
     page.add(&g);
@@ -142,14 +166,7 @@ pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: im
     match infos.as_slice() {
         [one] => {
             let Some(f) = info_file(one) else { return };
-            // re-query for times/owner the listing didn't ask for
-            let info = f
-                .query_info(
-                    &format!("{ATTRS},time::*,owner::*,unix::*,access::*"),
-                    gio::FileQueryInfoFlags::NONE,
-                    gio::Cancellable::NONE,
-                )
-                .unwrap_or_else(|_| one.clone());
+            let info = one.clone();
             title = info.display_name().to_string();
             let ct = info.content_type().map(|c| c.to_string()).unwrap_or_default();
             action_row(&g, "Name", &title);
@@ -166,18 +183,15 @@ pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: im
                 size_row.set_subtitle("Counting…");
                 if let Some(p) = f.path() {
                     glib::spawn_future_local(async move {
-                        let q = crate::search::under_query(&p);
-                        let r = gio::spawn_blocking(move || crate::search::stats(&q)).await.ok().flatten();
-                        size_row.set_subtitle(&r.map_or("Needs kestrel-indexd".into(), |(n, b)| format!("{} for {n} items", glib::format_size(b))));
+                        let r = gio::spawn_blocking(move || crate::search::folder_stats(&p))
+                            .await
+                            .unwrap_or(Err("Counting failed"));
+                        size_row.set_subtitle(&r.map_or_else(String::from, |(n, b)| format!("{} for {n} items", glib::format_size(b))));
                     });
                 }
             }
-            if info.file_type() == gio::FileType::SymbolicLink || info.is_symlink() {
-                action_row(
-                    &g,
-                    "Link Target",
-                    info.symlink_target().map(|p| p.display().to_string()).unwrap_or_default().as_str(),
-                );
+            if let Some(t) = crate::browser::link_target(&info) {
+                action_row(&g, "Link Target", &t.display().to_string());
             }
             let t = adw::PreferencesGroup::builder().title("Times").build();
             page.add(&t);
@@ -208,11 +222,20 @@ pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: im
                         .sensitive(info.boolean("access::can-write"))
                         .build();
                     let f2 = f.clone();
+                    let toast = std::rc::Rc::new(toast);
                     sw.connect_active_notify(move |sw| {
                         let m = if sw.is_active() { mode | ((mode & 0o444) >> 2) } else { mode & !0o111 };
-                        if let Err(e) = f2.set_attribute_uint32("unix::mode", m, gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE) {
-                            toast(e.message());
-                        }
+                        let (f2, toast) = (f2.clone(), toast.clone());
+                        glib::spawn_future_local(async move {
+                            let r = gio::spawn_blocking(move || {
+                                f2.set_attribute_uint32("unix::mode", m, gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
+                                    .map_err(|e| e.message().to_string())
+                            })
+                            .await;
+                            if let Ok(Err(e)) = r {
+                                toast(&e);
+                            }
+                        });
                     });
                     p.add(&sw);
                 }

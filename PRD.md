@@ -421,3 +421,32 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.15 (2026-10-26): review fixes.** (1) Index service: caller groups from SO_PEERGROUPS at connect time (was
+  /proc/<pid>/status, a pid-reuse race); per-uid (32) and total (256) connection caps, 64 KB request lines (also
+  for --http); unit gets MemoryHigh=1G, MemoryMax=3G, TasksMax=256; `content:` opens files with the caller's
+  fsuid/fsgid/groups (per-thread setfsuid + raw setgroups; fails closed), so the kernel enforces permissions even
+  when the index's mode is stale — unit needs CAP_SETUID/CAP_SETGID. smoke-live.sh gains "content: finds my own
+  file", "content: root's readable file" and "content: kernel says no (stale index)". Daemon tests 1 → 3.
+  (2) packaging/THIRD-PARTY-LICENSES.txt (scripts/third-party-licenses.py): licences of all 79 crates + C libgit2,
+  shipped in /usr/share/doc/kestrel. (3) No blocking GIO on the GTK thread: transfer conflict check, drop
+  copy/move decision, rename, new folder, Properties query + chmod switch, location bar, extract/compress name
+  checks, batch-rename folder listings (which also fixes clash detection: gio::File compares by identity, so
+  same-folder names were never matched). (4) scripts/ui-check.sh: real app under Xvfb with a demo home, screens
+  to target/ui-check/. (5) archive.rs split out of fileops.rs; browser/ (mod, format, cells, searching, miller)
+  and window/ (mod, actions, searchbar); clippy clean on all targets. 46 tests.
+  Smoke run on 0.9.15 found a real (old) race: a full rescan only sees drives mounted when it starts, so a drive
+  unmounted during it came back and one mounted during it vanished. Now every rescan is followed by a mount
+  reconcile (`install()`), and the watch loop reconciles once after the first scan. smoke-live.sh reordered (its
+  new lost-event file had triggered the repair rescan early); ui-check.sh feeds /dev/null to xvfb-run (its stty
+  stopped the run with SIGTTOU under `timeout`).
+  First ui-check run (23 screens) found: every view logged a GIO CRITICAL asking non-links for their link target
+  (now `browser::link_target`); double-click/Browse Archive on .7z failed ("does not support seeking": GNOME's
+  archive backend can't do 7z, single streams, disk images; `archive::browsable` from mounting all 70 samples,
+  those open normally instead); `--select` and FileManager1.ShowItems did nothing in columns view (now selects in
+  the first column); folder size said "0 items" for folders outside the index (now "Not in the search index");
+  terminal panel was black in light mode (follows light/dark). smoke-live.sh waits for results, not rescan counts.
+  Second run: Browse Archive mounted but then said "not mounted": GVfs names archive mounts by the file URI
+  escaped twice; `archive_root` escaped once (broken since browse-archive was added). Inside an archive the tab
+  and path bar now say "sample.zip" (`archive_source`), and the hidden-files filter no longer logs a CRITICAL
+  there (archive listings have no is-hidden); archive mounts get no free-space bar (they report 100% full).
+  Sidebar: File System and its free-space bar moved to the top, between Tags and Home (Alex's request).

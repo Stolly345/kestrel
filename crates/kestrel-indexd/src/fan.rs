@@ -110,6 +110,8 @@ impl Fan {
                 cpath(m).as_ptr(),
             )
         })?;
+        // marking again is a no-op in the kernel; keep one entry here too (a rescan re-syncs mounts)
+        self.mounts.retain(|(_, p)| p != m);
         self.mounts.push((fsid(m)?, m.to_path_buf()));
         Ok(())
     }

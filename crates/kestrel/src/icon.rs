@@ -57,7 +57,7 @@ fn theme_folder_colour() -> Option<[u8; 3]> {
     }
     let (bytes, stride) = (pb.read_pixel_bytes(), pb.rowstride() as usize);
     let rows = (0..pb.height() as usize).map(|y| &bytes[y * stride..y * stride + pb.width() as usize * 4]);
-    dominant(rows.flat_map(|r| r.chunks_exact(4)))
+    dominant(rows.flat_map(|r| r.as_chunks::<4>().0.iter().map(|px| px.as_slice())))
 }
 
 fn dominant<'a>(px: impl Iterator<Item = &'a [u8]>) -> Option<[u8; 3]> {

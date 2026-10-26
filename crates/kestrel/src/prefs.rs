@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::path::PathBuf;
 
+/// A callback filled in after the widgets that call it exist.
+type Slot = RefCell<Option<std::rc::Rc<dyn Fn()>>>;
+/// Change the column list (and save it, if the bool says so).
+type ColumnEdit = std::rc::Rc<dyn Fn(&dyn Fn(&mut Vec<ColumnPref>), bool)>;
+
 /// One optional Details-view column: shown or not, its width, and (by its place in the list) its order.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ColumnPref {
@@ -215,7 +220,7 @@ fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
     let reset = gtk::Button::builder().label("Reset").css_classes(["flat"]).valign(gtk::Align::Center).build();
     group.set_header_suffix(Some(&reset));
     let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::default();
-    let rebuild: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let rebuild: Rc<Slot> = Rc::default();
     let change = {
         let (apply, rebuild) = (apply.clone(), rebuild.clone());
         move |f: &dyn Fn(&mut Vec<ColumnPref>), relayout: bool| {
@@ -231,7 +236,7 @@ fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
             }
         }
     };
-    let change: Rc<dyn Fn(&dyn Fn(&mut Vec<ColumnPref>), bool)> = Rc::new(change);
+    let change: ColumnEdit = Rc::new(change);
     let (g, rws, ch) = (group.clone(), rows.clone(), change.clone());
     let build: Rc<dyn Fn()> = Rc::new(move || {
         for r in rws.borrow_mut().drain(..) {
@@ -484,9 +489,9 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
     ex.add(&buttons);
 
     // rebuild the rows from `list`; removing one marks the list dirty
-    let refresh: std::rc::Rc<RefCell<Option<Box<dyn Fn()>>>> = Default::default();
+    let refresh: std::rc::Rc<Slot> = Default::default();
     let (rows2, list2, apply2, refresh2) = (rows.clone(), list.clone(), apply.clone(), refresh.clone());
-    *refresh.borrow_mut() = Some(Box::new(move || {
+    *refresh.borrow_mut() = Some(std::rc::Rc::new(move || {
         while let Some(c) = rows2.first_child() {
             rows2.remove(&c);
         }

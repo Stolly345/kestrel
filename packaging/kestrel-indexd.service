@@ -17,7 +17,13 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateNetwork=yes
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+# SYS_ADMIN: fanotify on whole file systems; DAC_READ_SEARCH: scan and open by handle;
+# SETUID/SETGID: `content:` opens files with the asking user's fsuid/groups (kernel-checked)
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID
+# any local user can query: bound what a flood of requests could cost
+MemoryHigh=1G
+MemoryMax=3G
+TasksMax=256
 RestrictAddressFamilies=AF_UNIX
 
 [Install]

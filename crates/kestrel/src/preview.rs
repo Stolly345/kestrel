@@ -112,7 +112,7 @@ fn prune(root: &std::path::Path, max_age: std::time::Duration, max_bytes: u64) {
 }
 
 /// The archive's contents as a summary line and a path per line (folders end in /).
-fn archive_text(entries: &[crate::fileops::Entry]) -> (String, String) {
+fn archive_text(entries: &[crate::archive::Entry]) -> (String, String) {
     const SHOW: usize = 1000;
     let (dirs, files): (Vec<_>, Vec<_>) = entries.iter().partition(|e| e.dir);
     let bytes: u64 = files.iter().map(|e| e.size).sum();
@@ -145,7 +145,7 @@ fn open_doc(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Option<D
     let pdf = if office {
         let pdf = dir.join("doc.pdf");
         if !pdf.exists() {
-            let mut c = crate::fileops::sandboxed("soffice", path, &dir);
+            let mut c = crate::archive::sandboxed("soffice", path, &dir);
             c.arg(format!("-env:UserInstallation=file://{}/profile", dir.display()))
                 .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
                 .arg(&dir)
@@ -162,7 +162,7 @@ fn open_doc(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Option<D
     let pages = match std::fs::read_to_string(&count).ok().and_then(|s| s.trim().parse().ok()) {
         Some(n) => n,
         None => {
-            let out = crate::fileops::sandboxed("pdfinfo", &pdf, &dir).arg(&pdf).output().ok()?;
+            let out = crate::archive::sandboxed("pdfinfo", &pdf, &dir).arg(&pdf).output().ok()?;
             let n: u32 = String::from_utf8_lossy(&out.stdout)
                 .lines()
                 .find_map(|l| l.strip_prefix("Pages:"))?
@@ -182,7 +182,7 @@ fn render_page(doc: &Doc, n: u32) -> Option<std::path::PathBuf> {
     if !png.exists() {
         // render under a temporary name: a half-written PNG must never be shown
         let tmp = doc.dir.join(format!("tmp{n}-{:?}", std::thread::current().id()).replace(['(', ')'], ""));
-        let mut c = crate::fileops::sandboxed("pdftoppm", &doc.pdf, &doc.dir);
+        let mut c = crate::archive::sandboxed("pdftoppm", &doc.pdf, &doc.dir);
         c.args([
             "-singlefile",
             "-scale-to-x",
@@ -610,12 +610,13 @@ impl Preview {
                 let lbl = gtk::Label::builder().label("Counting…").css_classes(["dim-label"]).build();
                 self.body.append(&lbl);
                 glib::spawn_future_local(async move {
-                    let q = crate::search::under_query(&p);
-                    let r = gio::spawn_blocking(move || crate::search::stats(&q)).await.ok().flatten();
+                    let r = gio::spawn_blocking(move || crate::search::folder_stats(&p))
+                        .await
+                        .unwrap_or(Err("Counting failed"));
                     if me_serial.get() == serial {
                         lbl.set_label(&match r {
-                            Some((n, b)) => format!("{n} items inside, {}", glib::format_size(b)),
-                            None => "Folder size needs kestrel-indexd".into(),
+                            Ok((n, b)) => format!("{n} items inside, {}", glib::format_size(b)),
+                            Err(why) => why.into(),
                         });
                     }
                 });
@@ -642,7 +643,7 @@ impl Preview {
             && let Some(p) = file.path()
         {
             self.body.append(&text_card(&read_head(&p)));
-        } else if crate::fileops::archive_ext(&info.name().to_string_lossy()).is_some()
+        } else if crate::archive::archive_ext(&info.name().to_string_lossy()).is_some()
             && let Some(p) = file.path().and_then(|p| p.canonicalize().ok())
         {
             let lbl = gtk::Label::builder()
@@ -657,7 +658,7 @@ impl Preview {
                 let r = gio::spawn_blocking(move || {
                     let scratch = cache_root().join("list");
                     std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
-                    crate::fileops::list_archive(&p, &scratch).map(|e| archive_text(&e))
+                    crate::archive::list_archive(&p, &scratch).map(|e| archive_text(&e))
                 })
                 .await
                 .unwrap_or_else(|_| Err("Couldn't read this archive".into()));

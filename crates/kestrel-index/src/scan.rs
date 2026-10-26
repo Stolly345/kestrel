@@ -146,7 +146,9 @@ pub fn read_acl(p: &Path) -> Option<Box<[AclEntry]>> {
         return None;
     }
     let v: Vec<AclEntry> = buf[4..n as usize]
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|c| AclEntry {
             tag: u16::from_le_bytes([c[0], c[1]]),
             perm: u16::from_le_bytes([c[2], c[3]]),

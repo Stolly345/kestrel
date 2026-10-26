@@ -264,6 +264,17 @@ pub fn stats(q: &str) -> Option<(usize, u64)> {
 }
 
 /// Everything below a local folder, quoted so spaces survive the query parser.
+/// A folder's (items, bytes) from the index, or why not. Blocking: call off the GTK thread.
+/// Zero items for a folder that has entries means the index doesn't cover it (tmpfs, a network
+/// share, an excluded folder), not that it's empty.
+pub fn folder_stats(dir: &std::path::Path) -> Result<(usize, u64), &'static str> {
+    let (n, b) = stats(&under_query(dir)).ok_or("Folder size needs kestrel-indexd")?;
+    if n == 0 && std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
+        return Err("Not in the search index");
+    }
+    Ok((n, b))
+}
+
 pub fn under_query(p: &std::path::Path) -> String {
     format!("\"under:{}\"", p.display())
 }

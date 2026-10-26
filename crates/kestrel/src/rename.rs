@@ -130,7 +130,48 @@ fn rename_all(jobs: Vec<(gio::File, String)>) -> (Vec<(gio::File, gio::File)>, O
     (done, None)
 }
 
+/// Folder URI → names already in it that aren't part of the batch (they'd clash with a new name).
+type Others = std::collections::HashMap<String, std::collections::HashSet<String>>;
+
+fn folder_key(f: &gio::File) -> String {
+    f.parent().map(|d| d.uri().to_string()).unwrap_or_default()
+}
+
+/// Read each folder once, on a worker thread (a slow network folder must not freeze typing).
+fn others_in_folders(files: &[gio::File]) -> Others {
+    let mut out = Others::new();
+    for f in files {
+        let key = folder_key(f);
+        if out.contains_key(&key) {
+            continue;
+        }
+        let names = f
+            .parent()
+            .and_then(|d| d.path())
+            .and_then(|p| std::fs::read_dir(p).ok())
+            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        out.insert(key, names);
+    }
+    for f in files {
+        if let (Some(set), Some(n)) = (out.get_mut(&folder_key(f)), f.basename()) {
+            set.remove(&*n.to_string_lossy());
+        }
+    }
+    out
+}
+
 pub fn show(ops: &Rc<Ops>, files: Vec<gio::File>) {
+    let ops = ops.clone();
+    glib::spawn_future_local(async move {
+        let f2 = files.clone();
+        if let Ok(others) = gio::spawn_blocking(move || others_in_folders(&f2)).await {
+            open(&ops, files, others);
+        }
+    });
+}
+
+fn open(ops: &Rc<Ops>, files: Vec<gio::File>, others: Others) {
     let names: Vec<String> = files.iter().map(|f| f.basename().unwrap_or_default().to_string_lossy().into_owned()).collect();
     let find = adw::EntryRow::builder().title("Find").build();
     let replace = adw::EntryRow::builder().title("Replace with").build();
@@ -220,24 +261,11 @@ pub fn show(ops: &Rc<Ops>, files: Vec<gio::File>) {
                 }
             };
             // names already in each folder that aren't part of this batch, plus the batch's new names
-            let mut taken: std::collections::HashMap<Option<gio::File>, std::collections::HashSet<String>> = Default::default();
+            // names already used in each folder: outside the batch, plus earlier new names
+            let mut taken = others.clone();
             let mut ok = true;
             for (i, (f, n)) in files.iter().zip(&new).enumerate() {
-                let dir = f.parent();
-                let set = taken.entry(dir.clone()).or_insert_with(|| {
-                    let mut s: std::collections::HashSet<String> = dir
-                        .as_ref()
-                        .and_then(|d| d.path())
-                        .and_then(|p| std::fs::read_dir(p).ok())
-                        .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-                        .unwrap_or_default();
-                    for (g, old) in files.iter().zip(&names) {
-                        if g.parent() == dir {
-                            s.remove(old);
-                        }
-                    }
-                    s
-                });
+                let set = taken.entry(folder_key(f)).or_default();
                 let bad = problem(n, set);
                 set.insert(n.clone());
                 ok &= bad.is_none();
@@ -348,6 +376,23 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn clashes_count_only_files_outside_the_batch() {
+        let d = std::env::temp_dir().join(format!("kestrel-others-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["a", "b", "c"] {
+            std::fs::write(d.join(n), "").unwrap();
+        }
+        let batch = [gio::File::for_path(d.join("a")), gio::File::for_path(d.join("b"))];
+        let others = others_in_folders(&batch);
+        let set = &others[&folder_key(&batch[0])];
+        // a↔b is fine (both are being renamed), but c belongs to a file outside the batch
+        assert!(problem("b", set).is_none() && problem("a", set).is_none());
+        assert_eq!(problem("c", set), Some("name already used"));
+        assert_eq!(others.len(), 1, "both files share one folder entry");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

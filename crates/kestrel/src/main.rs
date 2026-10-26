@@ -1,5 +1,6 @@
 //! Kestrel: Everything-style instant search inside a Files-style file manager.
 
+mod archive;
 mod browser;
 mod filemanager1;
 mod fileops;
@@ -133,10 +134,11 @@ pub fn label_icon_buttons(root: &gtk::Widget) {
         let is_button = w.is::<gtk::Button>() || w.is::<gtk::MenuButton>();
         let has_text = w.downcast_ref::<gtk::Button>().is_some_and(|b| b.label().is_some_and(|l| !l.is_empty()))
             || w.downcast_ref::<gtk::MenuButton>().is_some_and(|b| b.label().is_some_and(|l| !l.is_empty()));
-        if is_button && !has_text {
-            if let Some(t) = w.tooltip_text() {
-                w.update_property(&[gtk::accessible::Property::Label(&t)]);
-            }
+        if is_button
+            && !has_text
+            && let Some(t) = w.tooltip_text()
+        {
+            w.update_property(&[gtk::accessible::Property::Label(&t)]);
         }
         let mut c = w.first_child();
         while let Some(ch) = c {

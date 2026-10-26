@@ -48,13 +48,28 @@ root=$(sudo env KESTREL_SOCK=$KESTREL_SOCK "$B/ks" -n 1 under:/root | wc -l)
 check "timeshift excluded" "under:/timeshift" 0
 check "docker excluded" "under:/var/lib/docker" 0
 
-# a lost event: missing at first, then found by the repair rescan (gap 5 s + a ~10-20 s scan)
+# content: reads files as the asker (the daemon switches its fsuid to yours)
+echo "kestrel-smoke-mine-$$" > "$T/mine.txt"
+check "content: finds my own file" "under:$T mine.txt content:kestrel-smoke-mine-$$" 1
+
+# a lost event: missing at first, then found by the repair rescan (gap 5 s + a ~10-20 s scan).
+# Also lost: a root-owned world-readable file, used below to show the kernel enforcing
+# permissions when the index is stale. Created together, so one repair rescan covers both.
+SECRET=$HOME/kestrel-smoke-lose-me-secret.txt
+sudo sh -c "echo kestrel-smoke-secret-$$ > '$SECRET' && chmod 644 '$SECRET'"
 touch "$HOME/kestrel-smoke-lose-me.txt"
 check "lost event: not applied" "kestrel-smoke-lose-me" 0
-for _ in $(seq 90); do grep -q 'events were lost' /tmp/kestrel-smoke.log && break; sleep 1; done
-for _ in $(seq 90); do [ "$(grep -c indexed /tmp/kestrel-smoke.log)" -ge 2 ] && break; sleep 1; done
-check "lost event: repaired by rescan" "kestrel-smoke-lose-me" 1
+# the first lost event starts a rescan at once, which may pass $HOME before the second file
+# exists; that one then waits out the 5 s gap for the next rescan. So wait for the answer itself.
+for _ in $(seq 120); do [ "$("$B/ks" kestrel-smoke-lose-me | grep -c .)" -ge 2 ] && break; sleep 1; done
+check "lost event: repaired by rescan" "kestrel-smoke-lose-me.txt" 1
 rm -f "$HOME/kestrel-smoke-lose-me.txt"
+check "content: root's readable file" "under:$HOME kestrel-smoke-lose-me-secret content:kestrel-smoke-secret-$$" 1
+sudo chmod 600 "$SECRET"
+check "content: kernel says no (stale index)" "under:$HOME kestrel-smoke-lose-me-secret content:kestrel-smoke-secret-$$" 0
+sudo rm -f "$SECRET"
+# the chmod and rm were lost events too: let their repair rescan finish before the drive checks
+for _ in $(seq 120); do [ "$("$B/ks" kestrel-smoke-lose-me | grep -c .)" -eq 0 ] && break; sleep 1; done
 
 # a "USB drive": a small ext4 image mounted while the daemon runs, then unmounted
 IMG=/tmp/kestrel-smoke.img; MNT=/tmp/kestrel-smoke-drive

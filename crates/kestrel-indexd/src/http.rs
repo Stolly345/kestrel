@@ -5,7 +5,7 @@
 use kestrel_index::proto::{Hit, Response};
 use kestrel_index::{Cred, Index, Kind, Query, Sort};
 use std::ffi::CString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
 
@@ -137,13 +137,12 @@ fn page(q: &str, r: Option<&Response>) -> String {
 
 fn handle(mut s: TcpStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<()> {
     let mut r = BufReader::new(s.try_clone()?);
-    let mut line = String::new();
-    r.read_line(&mut line)?;
-    // drain headers
-    let mut h = String::new();
-    while r.read_line(&mut h)? > 2 {
-        h.clear();
-    }
+    let mut raw = Vec::new();
+    crate::read_line_limited(&mut r, &mut raw)?;
+    let line = String::from_utf8_lossy(&raw).into_owned();
+    // drain headers (each bounded; a client can't make us buffer without end)
+    let mut h = Vec::new();
+    while crate::read_line_limited(&mut r, &mut h)? > 2 {}
     let target = line.split_whitespace().nth(1).unwrap_or("/");
     let (path, qs) = target.split_once('?').unwrap_or((target, ""));
     let q = param(qs, "q").unwrap_or_default();

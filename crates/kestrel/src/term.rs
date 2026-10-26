@@ -85,6 +85,25 @@ impl Term {
 
     fn spawn(self: &Rc<Self>, dir: Option<PathBuf>) -> vte4::Terminal {
         let term = vte4::Terminal::builder().scrollback_lines(10_000).vexpand(true).build();
+        // VTE is black whatever the theme; follow light/dark like the views around it
+        let style = adw::StyleManager::default();
+        let colors = |t: &vte4::Terminal, dark: bool| {
+            let (fg, bg) = if dark { ("#ffffff", "#1e1e1e") } else { ("#2e3436", "#ffffff") };
+            t.set_colors(gtk::gdk::RGBA::parse(fg).ok().as_ref(), gtk::gdk::RGBA::parse(bg).ok().as_ref(), &[]);
+        };
+        colors(&term, style.is_dark());
+        let weak = term.downgrade();
+        let id = style.connect_dark_notify(move |s| {
+            if let Some(t) = weak.upgrade() {
+                colors(&t, s.is_dark());
+            }
+        });
+        let id = RefCell::new(Some(id));
+        term.connect_destroy(move |_| {
+            if let Some(id) = id.take() {
+                adw::StyleManager::default().disconnect(id);
+            }
+        });
         let sh = shell_cmd();
         let wd = dir.as_ref().map(|d| d.to_string_lossy().into_owned());
         *self.synced.borrow_mut() = dir.unwrap_or_default();

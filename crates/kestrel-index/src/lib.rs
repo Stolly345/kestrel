@@ -93,9 +93,58 @@ pub enum Sort {
 }
 
 /// Who is asking. uid 0 sees everything.
+#[derive(Clone)]
 pub struct Cred {
     pub uid: u32,
     pub gids: Vec<u32>,
+}
+
+thread_local! {
+    /// Whose permissions `content:` reads with on this thread (set per search; None = our own).
+    static READ_AS: std::cell::RefCell<Option<Cred>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Read a file for `content:` as the caller: the open happens with this thread's filesystem uid,
+/// gid and groups switched to theirs, so the kernel enforces their permissions even if the index's
+/// copy of the file's mode is a moment stale. On Linux these are per-thread, and root's
+/// file-access capabilities drop while the fsuid isn't 0. Needs CAP_SETUID/CAP_SETGID; if the
+/// switch doesn't take, nothing is read.
+pub(crate) fn read_as_caller(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    // only root has more access than the caller; anyone else already reads with their own rights
+    let as_root = unsafe { libc::geteuid() } == 0;
+    let Some(c) = READ_AS.with_borrow(|c| c.clone()).filter(|c| c.uid != 0 && as_root) else {
+        return std::fs::read(path);
+    };
+    let gid = c.gids.first().copied().unwrap_or(65534);
+    let denied = || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    // SAFETY: plain syscalls on this thread's credentials; every path below restores them
+    unsafe {
+        let n = libc::getgroups(0, std::ptr::null_mut());
+        let mut old = vec![0 as libc::gid_t; n.max(0) as usize];
+        if libc::getgroups(n, old.as_mut_ptr()) < 0 {
+            return Err(denied());
+        }
+        // raw syscall: glibc's setgroups() would change every thread in the process
+        let set = |g: &[u32]| libc::syscall(libc::SYS_setgroups, g.len(), g.as_ptr()) == 0;
+        let restore = || {
+            libc::setfsuid(0);
+            libc::setfsgid(0);
+            set(&old);
+        };
+        if !set(&c.gids) {
+            return Err(denied());
+        }
+        libc::setfsgid(gid);
+        libc::setfsuid(c.uid);
+        // setfsuid() reports the previous value: asking again tells whether the switch happened
+        let switched = libc::setfsuid(c.uid) as u32 == c.uid && libc::setfsgid(gid) as u32 == gid;
+        let file = if switched { std::fs::File::open(path) } else { Err(denied()) };
+        restore();
+        let mut buf = Vec::new();
+        file?.read_to_end(&mut buf)?;
+        Ok(buf)
+    }
 }
 
 impl Cred {
@@ -348,20 +397,25 @@ impl Index {
 
     // ponytail: sorts the match set per query; pre-sorted column arrays (Everything's trick) if huge result sets feel slow.
     pub fn search(&self, q: &Query, sort: Sort, desc: bool, cred: Option<&Cred>) -> Vec<u32> {
+        let read_as = if q.reads { cred.cloned() } else { None };
         let mut hits: Vec<u32> = (0..self.len() as u32)
             .into_par_iter()
-            .filter(|&i| {
-                let e = &self.entries[i as usize];
-                if e.kind == Kind::Gone {
-                    return false;
-                }
-                if q.reads {
-                    // the daemon reads as root: never open what the caller couldn't
-                    cred.is_none_or(|c| c.uid == 0 || (self.visible(i, c) && c.can(e, self.file_acl(i).as_deref(), 4))) && q.matches(self, i)
-                } else {
-                    q.matches(self, i) && cred.is_none_or(|c| self.visible(i, c))
-                }
-            })
+            // each worker thread reads `content:` files as the caller (see read_as_caller)
+            .map_init(
+                || READ_AS.set(read_as.clone()),
+                |_, i| {
+                    let e = &self.entries[i as usize];
+                    let keep = e.kind != Kind::Gone
+                        && if q.reads {
+                            // never open what the caller couldn't: the index's view first, then the kernel's
+                            cred.is_none_or(|c| c.uid == 0 || (self.visible(i, c) && c.can(e, self.file_acl(i).as_deref(), 4))) && q.matches(self, i)
+                        } else {
+                            q.matches(self, i) && cred.is_none_or(|c| self.visible(i, c))
+                        };
+                    keep.then_some(i)
+                },
+            )
+            .flatten()
             .collect();
         match sort {
             Sort::Name => hits.par_sort_unstable_by(|&a, &b| self.lname(a).cmp(self.lname(b)).then(a.cmp(&b))),
@@ -424,5 +478,26 @@ impl Index {
             d += 1;
             cur = p;
         }
+    }
+}
+
+#[cfg(test)]
+mod read_as_tests {
+    use super::*;
+
+    #[test]
+    fn content_reads_fail_closed() {
+        let p = std::env::temp_dir().join(format!("kestrel-readas-{}", std::process::id()));
+        std::fs::write(&p, "hello").unwrap();
+        let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+        if uid == 0 {
+            return; // the root path (switching to the caller) is covered by scripts/smoke-live.sh
+        }
+        // not root: nothing to drop, reads go through with our own rights and creds stay put
+        READ_AS.set(Some(Cred { uid: uid + 1, gids: vec![gid] }));
+        assert_eq!(read_as_caller(&p).unwrap(), b"hello");
+        READ_AS.set(None);
+        assert_eq!(unsafe { libc::setfsuid(u32::MAX) } as u32, uid);
+        std::fs::remove_file(&p).unwrap();
     }
 }

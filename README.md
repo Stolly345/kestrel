@@ -95,8 +95,10 @@ flowchart LR
   renamed and deleted files are searchable within a second. If the kernel ever drops events, the
   service notices and rescans.
 - **Privacy:** any user may ask, but every answer is filtered by the asker's own uid, groups and
-  ACLs. Files inside someone else's private folder never appear, and `content:` checks read
-  permission before opening anything.
+  ACLs, which the kernel reports for the connection. Files inside someone else's private folder
+  never appear, and `content:` opens files *as the asking user*, so the kernel itself enforces
+  their permissions. Each user gets a bounded number of connections and request size, and the
+  service runs under systemd memory and task limits.
 - **Untrusted files are opened in a sandbox.** Archive extraction and document rendering run
   under bubblewrap: no network, your home folder hidden, only the output folder writable. A
   hostile archive can't write anywhere else, whatever paths it contains.
@@ -207,11 +209,17 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   Extract produces. Samples live in `crates/kestrel/tests/fixtures/archives/` and are built by
   `scripts/make-archive-fixtures.sh`; a new extension fails the test until it has one.
   Per-format report: `cargo test -p kestrel every_format -- --nocapture`.
+- **`scripts/ui-check.sh`** drives the real app through 23 screens under a virtual display
+  (views, previews, dialogs, batch rename, terminal, Extract and its conflict prompt, Trash) with
+  a throwaway home folder, checks 4 results along the way, and saves every screen to
+  `target/ui-check/`.
 - **`scripts/smoke-live.sh`** (run as yourself; it uses sudo only for a test service) checks live
   updates, permission filtering, excluded folders, and drives mounting and unmounting. Run it
   after any change to `kestrel-indexd` or `kestrel-index`.
 - **7-Zip updates:** check [ip7z/7zip releases](https://github.com/ip7z/7zip/releases) monthly
   and run `scripts/update-7zip.sh VERSION` (it verifies the download's SHA-256).
+- **Licence notices:** after changing dependencies, run `python3 scripts/third-party-licenses.py`
+  to refresh `packaging/THIRD-PARTY-LICENSES.txt` (installed with the package).
 
 | Path | What |
 |---|---|
@@ -239,6 +247,8 @@ Kestrel is licensed under either of the [Apache License 2.0](LICENSE-APACHE) or 
 Unless you explicitly state otherwise, any contribution you submit for inclusion in Kestrel, as
 defined in the Apache-2.0 license, is dual licensed as above, without any additional terms.
 
+Licences of the Rust crates and the C libgit2 compiled into Kestrel are collected in
+[packaging/THIRD-PARTY-LICENSES.txt](packaging/THIRD-PARTY-LICENSES.txt).
 **Bundled:** [7-Zip](https://www.7-zip.org/) by Igor Pavlov (GNU LGPL, with the unRAR licence
 restriction for RAR code; see [packaging/7zip/License.txt](packaging/7zip/License.txt)).
 **Test samples:** files from [libarchive](https://github.com/libarchive/libarchive)

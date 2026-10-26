@@ -39,6 +39,8 @@ pub enum Dupe {
 // ponytail: whole-file read per candidate; stream + mmap if people grep multi-GB logs.
 pub const CONTENT_MAX: u64 = 64 << 20;
 
+// built once per query, a handful of nodes: boxing the big variants would only add indirection
+#[allow(clippy::large_enum_variant)]
 enum Node {
     All(Vec<Node>),
     Any(Vec<Node>),
@@ -67,6 +69,7 @@ enum Leaf {
     Len(i64, i64),
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Pat {
     Sub(Finder<'static>, bool),
     Glob(Vec<u8>, bool),
@@ -193,7 +196,7 @@ fn eval(n: &Node, ix: &Index, i: u32) -> bool {
                 Leaf::Content(f, case) => {
                     e.kind == Kind::File
                         && e.size <= CONTENT_MAX
-                        && std::fs::read(std::ffi::OsStr::from_bytes(&ix.path(i))).is_ok_and(|mut b| {
+                        && crate::read_as_caller(std::path::Path::new(std::ffi::OsStr::from_bytes(&ix.path(i)))).is_ok_and(|mut b| {
                             if !case {
                                 b.make_ascii_lowercase();
                             }

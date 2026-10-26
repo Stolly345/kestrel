@@ -255,7 +255,8 @@ impl Sidebar {
             if uri.starts_with("trash:") || uri.starts_with("file:") {
                 droppable(&r, gio::File::for_uri(uri), &drop);
             }
-            places.append(&r);
+            // File System and its free-space bar sit at the top, between Tags and Home
+            if uri == "file:///" { places.prepend(&r) } else { places.append(&r) }
         }
         wire(&places, &navigate);
         let bookmarks = listbox();
@@ -275,7 +276,7 @@ impl Sidebar {
             tags.append(&b);
         }
 
-        // tags first, above Home
+        // tags first, then File System, Home…
         col.append(&section("Tags"));
         col.append(&tags);
         col.append(&places);
@@ -394,7 +395,10 @@ impl Sidebar {
             }
             let nav = self.navigate.clone();
             let root = m.root();
-            usage_bar(&r, &b, root.clone());
+            // an archive reports itself 100% full; a bar there means nothing
+            if !root.has_uri_scheme("archive") {
+                usage_bar(&r, &b, root.clone());
+            }
             let g = gtk::GestureClick::new();
             droppable(&r, root.clone(), &self.drop);
             g.connect_released(move |_, _, _, _| nav(Loc::Dir(root.clone())));
