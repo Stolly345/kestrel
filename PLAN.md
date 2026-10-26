@@ -82,11 +82,14 @@ Runtime, recommended, build and test-sample dependencies: README.md.
 - GUI saves state in `~/.config/kestrel/` (session.json, history, searches); bookmarks shared with Nautilus.
 - Headless checks: `GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 kestrel --screenshot out.png [--select NAME] [--action NAME[::target]] PATH`
   (run `gtk4-broadwayd :7` first; dialogs land in `out.png.dialog.png`).
-- Tests: 13 (`cargo test --release --workspace`). `scripts/smoke-live.sh` (needs sudo) covers fanotify live updates.
+- Tests: 41 as of 0.9.14 (`KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace`), incl. all 70 archive
+  formats. `scripts/smoke-live.sh` (run as yourself; sudo only for its test daemon) covers fanotify live updates.
 
 ## Known ceilings
 - ~~ACLs ignored~~ — fixed in M4: directory ACLs read at scan time, file ACLs before `content:` reads.
 - Moved folders are removed + rescanned (no FAN_RENAME pairing).
 - ~~ASCII-only case folding~~ — Unicode lowercasing since M4 (ß is not folded to ss); non-UTF-8 names shown lossy.
 - No syntax highlighting in text preview (install `libgtksourceview-5-dev` to add it); no custom tag names.
-- Copy/move never overwrites (auto `name (2)`); no conflict dialog yet.
+- ~~No conflict dialog~~ — Skip / Keep Both / Replace since 0.4.0 (also for extract since 0.9.10); a failed item
+  no longer stops a batch (0.9.13).
+- Not click-tested since 0.9.10: Broadway can't run inside the Claude sandbox (unix sockets blocked).

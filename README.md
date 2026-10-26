@@ -71,9 +71,11 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
 ```
 
 - `every_format_extracts` extracts a real sample of all 70 archive formats through the same
-  sandbox as Extract Here, checks the contents and that the preview listing matches. Samples
-  live in `crates/kestrel/tests/fixtures/archives/` (sources and licences in its README) and are
-  built by `scripts/make-archive-fixtures.sh`. A new extension fails the test until it has a sample.
+  sandbox as Extract Here, checks the contents, and checks the preview pane lists exactly the files
+  Extract produces. Samples live in `crates/kestrel/tests/fixtures/archives/` (sources and licences
+  in its README) and are built by `scripts/make-archive-fixtures.sh`. A new extension fails the
+  test until it has a sample. For a per-format report:
+  `KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test -p kestrel every_format -- --nocapture`
 - `scripts/smoke-live.sh` (run as yourself; it uses sudo only for a test daemon): live index
   updates, per-user permission filtering, excludes, drives mounting and unmounting. Run it after
   any change to `kestrel-indexd` or `kestrel-index`.
