@@ -1740,10 +1740,7 @@ impl Browser {
             }
         } else if let Some(f) = info_file(info) {
             // GVfs' archive backend is in gvfs-backends (Recommends); without it, open in an app
-            if f.is_native()
-                && crate::fileops::browse_on_open(&info.name().to_string_lossy())
-                && std::path::Path::new("/usr/libexec/gvfsd-archive").exists()
-            {
+            if f.is_native() && crate::fileops::browse_on_open(&info.name().to_string_lossy()) && std::path::Path::new("/usr/libexec/gvfsd-archive").exists() {
                 self.go(Loc::Dir(crate::fileops::archive_root(&f)));
                 self.focus_view();
             } else {

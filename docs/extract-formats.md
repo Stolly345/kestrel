@@ -7,6 +7,11 @@ the system `tar`, sandboxed the same way. Encrypted archives ask for the passwor
 
 The list lives in code as `ARCHIVE_EXTS` in `crates/kestrel/src/fileops.rs`; keep the two in step.
 
+Every extension below is tested: `every_format_extracts` extracts a real sample of each (in
+`crates/kestrel/tests/fixtures/archives/`) through the same sandbox as Extract Here, checks the
+contents, and checks the preview listing matches what comes out. Adding an extension to the list
+fails that test until `scripts/make-archive-fixtures.sh` has a sample for it.
+
 ## Archives
 
 | Extension | Format | Notes |

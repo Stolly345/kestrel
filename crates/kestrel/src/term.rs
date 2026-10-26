@@ -165,6 +165,9 @@ impl Term {
 mod tests {
     #[test]
     fn cd_quoting() {
-        assert_eq!(super::cd_line(std::path::Path::new("/home/a/it's here")), b"\x15 cd -- '/home/a/it'\\''s here'\r");
+        assert_eq!(
+            super::cd_line(std::path::Path::new("/home/a/it's here")),
+            b"\x15 cd -- '/home/a/it'\\''s here'\r"
+        );
     }
 }

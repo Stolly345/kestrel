@@ -732,6 +732,28 @@ struct Unpacked {
 
 /// Extract `archive` into `out` with the sandboxed 7-Zip, feeding its percentage to the
 /// progress bar. The password goes over stdin, not argv, so other users can't read it from /proc.
+/// Extract `archive` (canonical, first volume) into the existing folder `out`, in the sandbox:
+/// tarballs with tar, everything else with the bundled 7-Zip. Returns how many unsafe links
+/// were skipped. This is all of Extract Here except naming and placing the result.
+fn unpack(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<usize, ExtractErr> {
+    let name = archive.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    if !is_tarball(&name) {
+        return run_7z(archive, out, pw, p);
+    }
+    let other = |e: std::io::Error| ExtractErr::Other(e.to_string());
+    let mut c = sandboxed("tar", archive, out);
+    c.arg("-xf").arg(archive).arg("-C").arg(out);
+    c.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let child = c.spawn().map_err(other)?;
+    match killable(p, child.id(), || child.wait_with_output()) {
+        _ if p.cancel.is_cancelled() => Err(ExtractErr::Cancelled),
+        Ok(out) => check(out).map(|_| 0).map_err(ExtractErr::Other),
+        Err(e) => Err(other(e)),
+    }
+}
+
 /// Returns how many unsafe links 7-Zip refused to create (see `outcome`).
 fn run_7z(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<usize, ExtractErr> {
     use std::io::{Read, Write};
@@ -1269,7 +1291,6 @@ impl Ops {
             return;
         }
         let name = file.basename().unwrap_or_default().to_string_lossy().into_owned();
-        let lower = name.to_lowercase();
         let stem_len = archive_ext(&name).map_or(name.len(), |e| name.len() - e.len());
         let tmp = unique_child(&dir, &format!(".{}.kestrel-extract", &name[..stem_len]));
         let final_name = name[..stem_len].to_string();
@@ -1282,24 +1303,7 @@ impl Ops {
                 let tpath = tmp.path().ok_or(ExtractErr::Other("no path".into()))?;
                 std::fs::create_dir(&tpath).map_err(other)?;
                 let tpath = tpath.canonicalize().map_err(other)?;
-                let r = if is_tarball(&lower) {
-                    let mut c = sandboxed("tar", &path, &tpath);
-                    c.arg("-xf").arg(&path).arg("-C").arg(&tpath);
-                    c.stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::piped());
-                    match c.spawn() {
-                        Ok(child) => match killable(p, child.id(), || child.wait_with_output()) {
-                            _ if p.cancel.is_cancelled() => Err(ExtractErr::Cancelled),
-                            Ok(out) => check(out).map(|_| 0).map_err(ExtractErr::Other),
-                            Err(e) => Err(other(e)),
-                        },
-                        Err(e) => Err(other(e)),
-                    }
-                } else {
-                    run_7z(&path, &tpath, pw.as_deref(), p)
-                };
-                let skipped = match r {
+                let skipped = match unpack(&path, &tpath, pw.as_deref(), p) {
                     Ok(n) => n,
                     Err(e) => {
                         let _ = std::fs::remove_dir_all(&tpath);
@@ -1649,6 +1653,87 @@ mod tests {
         for n in ["a.deb", "b.iso", "c.epub", "d.qcow2", "e.docx", "f.whl"] {
             assert!(!browse_on_open(n), "{n}");
         }
+    }
+
+    /// Every extension Extract is offered on, extracted from a real sample through the same
+    /// sandboxed path as Extract Here. Samples: tests/fixtures/archives, built by
+    /// scripts/make-archive-fixtures.sh. A new ARCHIVE_EXTS entry fails here until it has one.
+    #[test]
+    fn every_format_extracts() {
+        if std::env::var("KESTREL_7ZZ").is_err() {
+            return;
+        }
+        fn walk(d: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                match e.file_type() {
+                    Ok(t) if t.is_dir() => walk(&e.path(), out),
+                    Ok(t) if t.is_file() => out.push(e.path()),
+                    _ => {}
+                }
+            }
+        }
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/archives");
+        let sample = |ext: &str| match ext {
+            ".z01" => "split.z01".to_string(),
+            ".001" => "split.7z.001".to_string(),
+            ".r00" => "oldrar.r00".to_string(),
+            e => format!("sample{e}"),
+        };
+        // packages keep their own layout, disk images and .dmg hold a whole file system image,
+        // LZH/CHM/old-style RAR are downloaded real-world files
+        const NO_HELLO: &[&str] = &[
+            ".deb", ".udeb", ".rpm", ".lzh", ".lha", ".chm", ".r00", ".dmg", ".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2", ".simg",
+        ];
+        let work = std::env::temp_dir().join(format!("kestrel-formats-{}", std::process::id()));
+        let (mut missing, mut failed) = (Vec::new(), Vec::new());
+        for (i, ext) in ARCHIVE_EXTS.iter().enumerate() {
+            let f = dir.join(sample(ext));
+            if !f.exists() {
+                missing.push(*ext);
+                continue;
+            }
+            let out = work.join(i.to_string());
+            std::fs::create_dir_all(&out).unwrap();
+            let out = out.canonicalize().unwrap();
+            let arc = first_volume(&f.canonicalize().unwrap());
+            if let Err(e) = unpack(&arc, &out, None, &Progress::default()) {
+                failed.push(format!(
+                    "{ext}: {}",
+                    match e {
+                        ExtractErr::Password => "asked for a password".into(),
+                        ExtractErr::Cancelled => "cancelled".into(),
+                        ExtractErr::Other(m) => m,
+                    }
+                ));
+                continue;
+            }
+            let mut files = Vec::new();
+            walk(&out, &mut files);
+            if files.is_empty() {
+                failed.push(format!("{ext}: nothing extracted"));
+            }
+            if !NO_HELLO.contains(ext) && !files.iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"Hello from Kestrel\n")) {
+                failed.push(format!("{ext}: hello.txt missing or wrong"));
+            }
+            // what the preview pane lists must be what Extract produces
+            let scratch = work.join(format!("list{i}"));
+            std::fs::create_dir_all(&scratch).unwrap();
+            match list_archive(&f.canonicalize().unwrap(), &scratch.canonicalize().unwrap()) {
+                Ok(entries) => {
+                    for e in entries.iter().filter(|e| !e.dir) {
+                        if !out.join(&e.path).exists() {
+                            failed.push(format!("{ext}: listed but not extracted: {}", e.path));
+                        }
+                    }
+                }
+                Err(e) => failed.push(format!("{ext}: listing failed: {e}")),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&work);
+        if !missing.is_empty() {
+            failed.push(format!("no sample for {missing:?}: run scripts/make-archive-fixtures.sh"));
+        }
+        assert!(failed.is_empty(), "\n{}", failed.join("\n"));
     }
 
     #[test]

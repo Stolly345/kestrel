@@ -401,3 +401,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   views cd the shell (only at its prompt, terminal not focused; Ctrl+U + leading-space cd), the shell's cwd (polled
   from /proc, any shell) moves the view; `exit` closes it. New dependency: libvte-2.91-gtk4-0 (auto via shlibs);
   build needs libvte-2.91-gtk4-dev. Unit-tested (40); not click-tested.
+- **Archive test automation (2026-10-26, after 0.9.13).** `scripts/make-archive-fixtures.sh` builds a sample for all
+  70 ARCHIVE_EXTS (committed under crates/kestrel/tests/fixtures/archives, ~780 KB in git; sources/licences in its
+  README); `fileops::every_format_extracts` extracts each through `unpack()` (the sandboxed core of Extract Here,
+  factored out), checks hello.txt where the format holds it, and checks every listed file came out. Fails on an
+  extension with no sample. Verified it catches the 0.9.11 split-archive bug when that fix is reverted. 70/70 pass.
