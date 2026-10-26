@@ -168,7 +168,7 @@ fn build(parent: &gtk::Widget, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) +
             let Some(f) = info_file(one) else { return };
             let info = one.clone();
             title = info.display_name().to_string();
-            let ct = info.content_type().map(|c| c.to_string()).unwrap_or_default();
+            let ct = crate::browser::content_type(&info).map(|c| c.to_string()).unwrap_or_default();
             action_row(&g, "Name", &title);
             action_row(&g, "Type", &format!("{} ({ct})", gio::content_type_get_description(&ct)));
             action_row(

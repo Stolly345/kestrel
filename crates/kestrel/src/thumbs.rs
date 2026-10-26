@@ -76,7 +76,7 @@ fn embedded(name: &str) -> Option<&'static [&'static str]> {
 }
 
 pub fn can_thumbnail(info: &gio::FileInfo) -> bool {
-    embedded(&info.name().to_string_lossy()).is_some() || info.content_type().is_some_and(|ct| find(&ct).is_some())
+    embedded(&info.name().to_string_lossy()).is_some() || crate::browser::content_type(info).is_some_and(|ct| find(&ct).is_some())
 }
 
 /// Wait for `child`, killing it after 10 s: broken files can hang thumbnailers (and 7-Zip).
@@ -212,7 +212,7 @@ thread_local! {
 /// (the tile scrolled away and was rebound).
 pub async fn get(info: &gio::FileInfo, size: Size, wanted: impl Fn() -> bool) -> Option<PathBuf> {
     let file = crate::browser::info_file(info)?;
-    let ct = info.content_type()?.to_string();
+    let ct = crate::browser::content_type(info)?.to_string();
     let uri = file.uri().to_string();
     let mtime = info.modification_date_time().map_or(0, |d| d.to_unix());
     if FAILED.with_borrow(|f| f.contains(&uri)) || !can_thumbnail(info) {

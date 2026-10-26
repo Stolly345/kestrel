@@ -56,6 +56,12 @@ pub(crate) fn link_target(info: &gio::FileInfo) -> Option<std::path::PathBuf> {
     info.has_attribute("standard::symlink-target").then(|| info.symlink_target()).flatten()
 }
 
+/// The file's type, if the listing included it. Some entries (network places, items still loading)
+/// come without one, and GIO's getter logs a CRITICAL for every such call.
+pub(crate) fn content_type(info: &gio::FileInfo) -> Option<glib::GString> {
+    info.has_attribute("standard::content-type").then(|| info.content_type()).flatten()
+}
+
 pub(crate) fn is_dirlike(info: &gio::FileInfo) -> bool {
     matches!(info.file_type(), gio::FileType::Directory | gio::FileType::Mountable | gio::FileType::Shortcut)
 }
@@ -82,7 +88,7 @@ pub(crate) fn mtime(i: &gio::FileInfo) -> i64 {
 
 /// The Type column, in the style chosen in Preferences.
 pub fn type_label(i: &gio::FileInfo) -> String {
-    let desc = i.content_type().map(|c| gio::content_type_get_description(&c).to_string()).unwrap_or_default();
+    let desc = content_type(i).map(|c| gio::content_type_get_description(&c).to_string()).unwrap_or_default();
     let name = i.name();
     let ext = (i.file_type() != gio::FileType::Directory).then(|| name.to_str().and_then(extension)).flatten();
     type_text(&desc, ext.as_deref(), crate::prefs::type_style())

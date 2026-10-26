@@ -4,7 +4,10 @@
 use crate::browser::{fmt_date, info_file, set_icon};
 use crate::thumbs;
 use adw::prelude::*;
+use gstreamer as gst;
+use gstreamer::prelude::*;
 use gtk::{gio, glib};
+use std::cell::{Cell, RefCell};
 
 pub struct Preview {
     pub root: gtk::Box,
@@ -163,95 +166,383 @@ fn read_song(path: &std::path::Path) -> Song {
     s
 }
 
-/// A music file: cover art, title / artist / album, and a player that's only created when you
-/// press Play (preparing a stream for every file you select is slow, and a GStreamer failure on a
-/// broken file would take the whole app down with it).
+/// A music file: cover art, title / artist / album, and a small player: previous / play / next,
+/// a seek bar and repeat, through the other songs in the same folder.
+///
+/// Played by Kestrel's own GStreamer pipeline (playbin, audio only) rather than GtkMediaFile:
+/// GTK always attaches a video sink, and GStreamer 1.28's decodebin3 aborts the whole process on
+/// some MP3s when one is attached ("mq_slot_handle_stream_start: assertion failed: (collection)").
+/// Nothing plays until you press Play, so selecting songs costs nothing.
 fn music(file: &gio::File, info: &gio::FileInfo) -> gtk::Box {
     let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(6).build();
-    let art = gtk::Image::builder()
-        .pixel_size(160)
-        .icon_name("audio-x-generic")
-        .css_classes(["music-art"])
+    let w = std::rc::Rc::new(SongWidgets {
+        art: gtk::Image::builder()
+            .pixel_size(160)
+            .icon_name("audio-x-generic")
+            .css_classes(["music-art"])
+            .build(),
+        pic: gtk::Picture::builder()
+            .can_shrink(true)
+            .content_fit(gtk::ContentFit::Contain)
+            .height_request(180)
+            .visible(false)
+            .css_classes(["music-art"])
+            .build(),
+        title: gtk::Label::builder()
+            .label(info.display_name().as_str())
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .css_classes(["title-3"])
+            .build(),
+        by: gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build(),
+        meta: gtk::Label::builder().css_classes(["dim-label", "caption"]).visible(false).build(),
+        error: gtk::Label::builder().wrap(true).css_classes(["error", "caption"]).visible(false).build(),
+    });
+    for x in [
+        w.art.upcast_ref::<gtk::Widget>(),
+        w.pic.upcast_ref(),
+        w.title.upcast_ref(),
+        w.by.upcast_ref(),
+        w.meta.upcast_ref(),
+    ] {
+        card.append(x);
+    }
+    let seek = gtk::Scale::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .hexpand(true)
+        .sensitive(false)
         .build();
-    let pic = gtk::Picture::builder()
-        .can_shrink(true)
-        .content_fit(gtk::ContentFit::Contain)
-        .height_request(180)
-        .visible(false)
-        .css_classes(["music-art"])
-        .build();
-    let title = gtk::Label::builder()
-        .label(info.display_name().as_str())
-        .wrap(true)
-        .justify(gtk::Justification::Center)
-        .css_classes(["title-3"])
-        .build();
-    let by = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).visible(false).build();
-    let meta = gtk::Label::builder().css_classes(["dim-label", "caption"]).visible(false).build();
-    let controls = gtk::MediaControls::builder().visible(false).hexpand(true).build();
+    seek.set_range(0.0, 1.0);
+    let time = gtk::Label::builder().label("0:00").css_classes(["dim-label", "caption", "numeric"]).build();
+    let row = gtk::Box::builder().spacing(6).build();
+    row.append(&seek);
+    row.append(&time);
+    let button = |icon: &str, tip: &str| {
+        gtk::Button::builder()
+            .icon_name(icon)
+            .tooltip_text(tip)
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular"])
+            .build()
+    };
+    let prev = button("media-skip-backward-symbolic", "Previous song in this folder");
+    let next = button("media-skip-forward-symbolic", "Next song in this folder");
     let play = gtk::Button::builder()
         .icon_name("media-playback-start-symbolic")
         .tooltip_text("Play")
-        .halign(gtk::Align::Center)
         .width_request(56)
         .height_request(56)
         .css_classes(["circular", "suggested-action", "music-play"])
         .build();
-    for w in [
-        art.upcast_ref::<gtk::Widget>(),
-        pic.upcast_ref(),
-        title.upcast_ref(),
-        by.upcast_ref(),
-        meta.upcast_ref(),
-        play.upcast_ref(),
-        controls.upcast_ref(),
-    ] {
-        card.append(w);
-    }
-    let (f, c2, card2) = (file.clone(), controls.clone(), card.clone());
-    play.connect_clicked(move |b| {
-        let m = gtk::MediaFile::for_file(&f);
-        say_media_errors(m.upcast_ref(), &card2);
-        c2.set_media_stream(Some(&m));
-        m.play();
-        b.set_visible(false);
-        c2.set_visible(true);
+    let repeat = button("media-playlist-consecutive-symbolic", "Repeat: off");
+    let buttons = gtk::CenterBox::builder().build();
+    let mid = gtk::Box::builder().spacing(12).build();
+    mid.append(&prev);
+    mid.append(&play);
+    mid.append(&next);
+    buttons.set_center_widget(Some(&mid));
+    buttons.set_end_widget(Some(&repeat));
+    card.append(&buttons);
+    card.append(&row);
+    card.append(&w.error);
+    show_song(&w, file.path());
+
+    let player = std::rc::Rc::new(Player {
+        pipeline: RefCell::new(None),
+        songs: RefCell::new(file.path().into_iter().collect()),
+        at: Cell::new(0),
+        repeat: Cell::new(Repeat::Off),
+        w,
+        seek: seek.clone(),
+        time,
+        play: play.clone(),
+        dragging: Cell::new(false),
     });
-    // stop when the preview moves on to another file
-    controls.connect_unmap(|c| {
-        if let Some(m) = c.media_stream() {
-            m.pause();
-        }
-    });
+    // the folder's other songs, for previous / next
     if let Some(path) = file.path() {
+        let p = player.clone();
         glib::spawn_future_local(async move {
-            let Ok(s) = gio::spawn_blocking(move || read_song(&path)).await else { return };
-            if let Some(t) = &s.title {
-                title.set_label(t);
-            }
-            let who: Vec<&str> = [s.artist.as_deref(), s.album.as_deref()].into_iter().flatten().collect();
-            by.set_label(&who.join(" \u{2014} "));
-            by.set_visible(!who.is_empty());
-            let mut bits = Vec::new();
-            if let Some(y) = s.year {
-                bits.push(y.to_string());
-            }
-            if s.secs > 0 {
-                bits.push(format!("{}:{:02}", s.secs / 60, s.secs % 60));
-            }
-            if let Some(k) = s.kbps.filter(|k| *k > 0) {
-                bits.push(format!("{k} kbps"));
-            }
-            meta.set_label(&bits.join(" \u{b7} "));
-            meta.set_visible(!bits.is_empty());
-            if let Some(t) = s.cover {
-                pic.set_paintable(Some(&t));
-                pic.set_visible(true);
-                art.set_visible(false);
+            let here = path.clone();
+            if let Ok(list) = gio::spawn_blocking(move || songs_beside(&here)).await
+                && let Some(at) = list.iter().position(|x| *x == path)
+            {
+                *p.songs.borrow_mut() = list;
+                p.at.set(at);
             }
         });
     }
+    let p = player.clone();
+    play.connect_clicked(move |_| p.toggle());
+    let p = player.clone();
+    prev.connect_clicked(move |_| p.step(-1, true));
+    let p = player.clone();
+    next.connect_clicked(move |_| p.step(1, true));
+    let p = player.clone();
+    repeat.connect_clicked(move |b| {
+        let r = p.repeat.get().next();
+        p.repeat.set(r);
+        b.set_icon_name(r.icon());
+        b.set_tooltip_text(Some(r.label()));
+    });
+    let p = player.clone();
+    seek.connect_change_value(move |_, _, v| {
+        p.dragging.set(true); // the next tick leaves the knob where the hand put it
+        if let Some(pl) = p.pipeline.borrow().as_ref() {
+            let _ = pl.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, gst::ClockTime::from_seconds_f64(v.max(0.0)));
+        }
+        glib::Propagation::Proceed
+    });
+    // position, and stop when the preview moves on to another file
+    let weak = std::rc::Rc::downgrade(&player);
+    glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+        let Some(p) = weak.upgrade() else { return glib::ControlFlow::Break };
+        p.tick();
+        glib::ControlFlow::Continue
+    });
+    let p = player.clone();
+    card.connect_unmap(move |_| p.stop());
+    // the card owns the player: dropped with it (the timer holds only a weak ref)
+    unsafe { card.set_data("kestrel-player", player) };
     card
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Repeat {
+    Off,
+    All,
+    One,
+}
+
+impl Repeat {
+    fn next(self) -> Repeat {
+        match self {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        }
+    }
+    fn icon(self) -> &'static str {
+        match self {
+            Repeat::Off => "media-playlist-consecutive-symbolic",
+            Repeat::All => "media-playlist-repeat-symbolic",
+            Repeat::One => "media-playlist-repeat-song-symbolic",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Repeat::Off => "Repeat: off",
+            Repeat::All => "Repeat: this folder",
+            Repeat::One => "Repeat: this song",
+        }
+    }
+}
+
+struct SongWidgets {
+    art: gtk::Image,
+    pic: gtk::Picture,
+    title: gtk::Label,
+    by: gtk::Label,
+    meta: gtk::Label,
+    error: gtk::Label,
+}
+
+struct Player {
+    pipeline: RefCell<Option<gst::Element>>,
+    songs: RefCell<Vec<std::path::PathBuf>>,
+    at: Cell<usize>,
+    repeat: Cell<Repeat>,
+    w: std::rc::Rc<SongWidgets>,
+    seek: gtk::Scale,
+    time: gtk::Label,
+    play: gtk::Button,
+    dragging: Cell<bool>,
+}
+
+impl Player {
+    fn current(&self) -> Option<std::path::PathBuf> {
+        self.songs.borrow().get(self.at.get()).cloned()
+    }
+
+    fn toggle(self: &std::rc::Rc<Self>) {
+        let state = self.pipeline.borrow().as_ref().map(|p| p.current_state());
+        match state {
+            Some(gst::State::Playing) => self.set(gst::State::Paused),
+            Some(_) => self.set(gst::State::Playing),
+            None => self.start(),
+        }
+    }
+
+    fn set(&self, s: gst::State) {
+        if let Some(p) = self.pipeline.borrow().as_ref() {
+            let _ = p.set_state(s);
+        }
+        let playing = s == gst::State::Playing;
+        self.play.set_icon_name(if playing {
+            "media-playback-pause-symbolic"
+        } else {
+            "media-playback-start-symbolic"
+        });
+        self.play.set_tooltip_text(Some(if playing { "Pause" } else { "Play" }));
+    }
+
+    fn stop(&self) {
+        if let Some(p) = self.pipeline.take() {
+            let _ = p.set_state(gst::State::Null);
+        }
+        self.play.set_icon_name("media-playback-start-symbolic");
+        self.seek.set_sensitive(false);
+    }
+
+    /// Build the pipeline for the current song and play it.
+    fn start(self: &std::rc::Rc<Self>) {
+        self.stop();
+        self.w.error.set_visible(false);
+        let Some(path) = self.current() else { return };
+        if gst::init().is_err() {
+            return self.fail("GStreamer isn't available");
+        }
+        let Ok(pb) = gst::ElementFactory::make("playbin")
+            .property("uri", gio::File::for_path(&path).uri().as_str())
+            .build()
+        else {
+            return self.fail("GStreamer's playbin is missing (gstreamer1.0-plugins-base)");
+        };
+        pb.set_property_from_str("flags", "audio+soft-volume"); // audio only: see music()
+        let bus = pb.bus().unwrap();
+        let weak = std::rc::Rc::downgrade(self);
+        let guard = bus.add_watch_local(move |_, msg| {
+            let Some(p) = weak.upgrade() else { return glib::ControlFlow::Break };
+            match msg.view() {
+                gst::MessageView::Eos(_) => p.ended(),
+                gst::MessageView::Error(e) => {
+                    let why = if e.error().matches(gst::CoreError::MissingPlugin) || e.error().matches(gst::StreamError::CodecNotFound) {
+                        "no codec for its format is installed (sudo apt install gstreamer1.0-libav)".to_string()
+                    } else {
+                        e.error().message().to_string()
+                    };
+                    p.stop();
+                    p.fail(&why);
+                }
+                _ => {}
+            }
+            glib::ControlFlow::Continue
+        });
+        // the watch lives as long as the pipeline; dropping the guard would remove it
+        if let Ok(g) = guard {
+            unsafe { pb.set_data("kestrel-bus-watch", g) };
+        }
+        *self.pipeline.borrow_mut() = Some(pb);
+        self.set(gst::State::Playing);
+        self.seek.set_sensitive(true);
+    }
+
+    fn fail(&self, why: &str) {
+        self.w.error.set_label(&format!("Can't play this: {why}"));
+        self.w.error.set_visible(true);
+    }
+
+    /// Previous / next song in the folder; `wrap` = go round from the last to the first.
+    fn step(self: &std::rc::Rc<Self>, by: isize, wrap: bool) {
+        let n = self.songs.borrow().len() as isize;
+        if n == 0 {
+            return;
+        }
+        let to = self.at.get() as isize + by;
+        let to = if wrap {
+            to.rem_euclid(n)
+        } else if (0..n).contains(&to) {
+            to
+        } else {
+            return self.stop();
+        };
+        let playing = self.pipeline.borrow().is_some();
+        self.at.set(to as usize);
+        show_song(&self.w, self.current());
+        self.seek.set_value(0.0);
+        self.time.set_label("0:00");
+        if playing { self.start() } else { self.stop() }
+    }
+
+    fn ended(self: &std::rc::Rc<Self>) {
+        match self.repeat.get() {
+            Repeat::One => self.start(),
+            Repeat::All => self.step(1, true),
+            Repeat::Off => {
+                let last = self.at.get() + 1 >= self.songs.borrow().len();
+                if last { self.stop() } else { self.step(1, false) }
+            }
+        }
+    }
+
+    fn tick(&self) {
+        let pl = self.pipeline.borrow();
+        let Some(pl) = pl.as_ref() else { return };
+        let (Some(pos), dur) = (pl.query_position::<gst::ClockTime>(), pl.query_duration::<gst::ClockTime>()) else {
+            return;
+        };
+        let mmss = |t: gst::ClockTime| format!("{}:{:02}", t.seconds() / 60, t.seconds() % 60);
+        if let Some(d) = dur {
+            self.seek.set_range(0.0, d.seconds_f64().max(1.0));
+            self.time.set_label(&format!("{} / {}", mmss(pos), mmss(d)));
+        } else {
+            self.time.set_label(&mmss(pos));
+        }
+        if !self.dragging.replace(false) {
+            self.seek.set_value(pos.seconds_f64());
+        }
+    }
+}
+
+/// Fill the card with a song's tags and cover (read off the GTK thread).
+fn show_song(w: &std::rc::Rc<SongWidgets>, path: Option<std::path::PathBuf>) {
+    let Some(path) = path else { return };
+    w.title.set_label(&path.file_name().unwrap_or_default().to_string_lossy());
+    w.by.set_visible(false);
+    w.meta.set_visible(false);
+    w.pic.set_visible(false);
+    w.art.set_visible(true);
+    let w = w.clone();
+    glib::spawn_future_local(async move {
+        let Ok(s) = gio::spawn_blocking(move || read_song(&path)).await else { return };
+        if let Some(t) = &s.title {
+            w.title.set_label(t);
+        }
+        let who: Vec<&str> = [s.artist.as_deref(), s.album.as_deref()].into_iter().flatten().collect();
+        w.by.set_label(&who.join(" \u{2014} "));
+        w.by.set_visible(!who.is_empty());
+        let mut bits = Vec::new();
+        if let Some(y) = s.year {
+            bits.push(y.to_string());
+        }
+        if s.secs > 0 {
+            bits.push(format!("{}:{:02}", s.secs / 60, s.secs % 60));
+        }
+        if let Some(k) = s.kbps.filter(|k| *k > 0) {
+            bits.push(format!("{k} kbps"));
+        }
+        w.meta.set_label(&bits.join(" \u{b7} "));
+        w.meta.set_visible(!bits.is_empty());
+        if let Some(t) = s.cover {
+            w.pic.set_paintable(Some(&t));
+            w.pic.set_visible(true);
+            w.art.set_visible(false);
+        }
+    });
+}
+
+/// The audio files in `song`'s folder, in name order (what previous / next walk through).
+fn songs_beside(song: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Some(dir) = song.parent() else { return vec![song.to_path_buf()] };
+    let mut v: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && gio::content_type_guess(Some(p), None).0.starts_with("audio/"))
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    v
 }
 
 /// A stream that can't play (no codec for it, a broken file) says so under the player instead of
@@ -646,7 +937,7 @@ impl Preview {
 
     fn one(&self, info: &gio::FileInfo, git: Option<char>) {
         let Some(file) = info_file(info) else { return };
-        let ct = info.content_type().map(|c| c.to_string()).unwrap_or_default();
+        let ct = crate::browser::content_type(info).map(|c| c.to_string()).unwrap_or_default();
         let is_dir = info.file_type() == gio::FileType::Directory;
 
         // the big visual

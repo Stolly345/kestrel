@@ -81,7 +81,7 @@ def demo():
 app_proc = None
 
 
-def start(*args, fresh=True):
+def start(*args, fresh=True, window=True):
     """Launch Kestrel and wait for its window; returns the accessible application."""
     global app_proc
     stop()
@@ -89,7 +89,10 @@ def start(*args, fresh=True):
         shutil.rmtree(CONF, ignore_errors=True)
     app_proc = subprocess.Popen([os.path.join(BIN, "kestrel"), *args], cwd=HOME,
                                 stdout=open(os.path.join(OUT, "app.log"), "a"), stderr=subprocess.STDOUT)
-    a = wait(lambda: find_app(), "the app's window")
+    if not window:  # D-Bus activated: no window, and not on the accessibility bus until it has one
+        time.sleep(2)
+        return None
+    a = wait(lambda: find_app(), "the app on the accessibility bus")
     wait(lambda: any(n.get_role_name() == "frame" for n in kids(a)), "a window")
     time.sleep(0.8)
     return a
@@ -425,6 +428,14 @@ def _():
     key("Alt_L", "Up"); eventually(lambda: "notes.md" in names(), "up to Demo")
 
 
+@test("navigate: the mouse's back and forward buttons")
+def _():
+    start(D)
+    click(row("Projects"), double=True); eventually(lambda: names() == ["aurora"], "Projects")
+    click(row("aurora"), button=8); eventually(lambda: "notes.md" in names(), "back in Demo")
+    click(row("notes.md"), button=9); eventually(lambda: names() == ["aurora"], "forward to Projects")
+
+
 @test("navigate: Enter opens the selected folder, Backspace goes up")
 def _():
     start(D)
@@ -496,8 +507,8 @@ def _():
 @test("view: details / grid / columns (Ctrl+1/2/3)")
 def _():
     start(D)
-    key("Control_L", "2"); eventually(lambda: not all_("table row") and "notes.md" in [n.get_name() for n in all_("list item")], "grid view")
-    key("Control_L", "3"); eventually(lambda: "Projects" in [n.get_name() for n in all_("list item")], "column view")
+    key("Control_L", "2"); eventually(lambda: not all_("table row") and "notes.md" in names(), "grid view")
+    key("Control_L", "3"); eventually(lambda: not all_("table row") and "Projects" in names() and all_("list item", ""), "column view")
     key("Control_L", "1"); eventually(lambda: "notes.md" in names() and all_("table row"), "details view")
 
 
@@ -526,8 +537,14 @@ def _():
 
 @test("dual pane: F3 opens it, F7 copies, F8 moves to the other pane")
 def _():
-    start(D, os.path.join(D, "Projects"), "--dual")
-    eventually(lambda: len(all_("table")) >= 2, "two panes")
+    start(D)
+    key("F3"); eventually(lambda: len(all_("tree table")) >= 2, "two panes")
+    key("F4")  # the right pane: point it at Projects
+    key("Control_L", "l")
+    e = wait(lambda: [x for x in all_("text") + all_("entry") if (x.get_name() or "") != "Search files"][0], "location entry")
+    set_text(e, os.path.join(D, "Projects")); key("Return")
+    eventually(lambda: "aurora" in names() and "notes.md" in names(), "Demo left, Projects right")
+    key("F4")
     select("IMG_0001.txt"); key("F7")
     eventually(lambda: exists("Projects/IMG_0001.txt") and exists("IMG_0001.txt"), "copied to Projects")
     select("IMG_0002.txt"); key("F8")
@@ -591,10 +608,11 @@ def _():
     start(D)
     select("IMG_0001.txt"); key("F2")
     e = wait(lambda: [x for x in all_("text") + all_("entry") if text_of(x) == "IMG_0001.txt"][0], "the rename field")
-    set_text(e, "holiday.txt"); key("Return")
-    eventually(lambda: exists("holiday.txt") and not exists("IMG_0001.txt"), "renamed on disk")
+    # typed, with a space: Space opens the preview in the file list but must still type here
+    key("Control_L", "a"); typ("holiday photo.txt"); key("Return")
+    eventually(lambda: exists("holiday photo.txt") and not exists("IMG_0001.txt"), "renamed on disk")
     key("Control_L", "z")
-    eventually(lambda: exists("IMG_0001.txt") and not exists("holiday.txt"), "undone")
+    eventually(lambda: exists("IMG_0001.txt") and not exists("holiday photo.txt"), "undone")
 
 
 @test("files: new folder (Ctrl+Shift+N)")
@@ -670,9 +688,10 @@ def _():
 def _():
     start(D)
     select("notes.md"); key("Control_L", "Shift_L", "c")
-    e = one("entry", "Search files")
-    click(e); key("Control_L", "v")
-    eventually(lambda: text_of(e) == os.path.join(D, "notes.md"), "the path pasted in the search box")
+    key("Control_L", "l")  # paste it into the location bar, a plain text field
+    e = wait(lambda: [x for x in all_("text") + all_("entry") if (x.get_name() or "") != "Search files"][0], "location entry")
+    key("Control_L", "a"); key("Control_L", "v")
+    eventually(lambda: text_of(e) == os.path.join(D, "notes.md"), "the copied path")
 
 
 @test("batch rename: find and replace across three files")
@@ -692,7 +711,7 @@ def _():
 def _():
     start(D)
     select("notes.md"); key("Alt_L", "p")
-    click(wait(lambda: [b for b in all_("button") if "blue" in (b.get_name() or "").lower() and "Files tagged" not in (b.get_name() or "")][0], "the blue tag dot"))
+    press_button("Tag Blue")
     eventually(lambda: b"blue" in os.getxattr(os.path.join(D, "notes.md"), "user.chimera.tags"), "the tag xattr")
 
 
@@ -728,7 +747,7 @@ def _():
 @test("search: tag search from the sidebar dots")
 def _():
     index(); start(D)
-    click(one("button", "Files tagged red"))
+    press_button("Files tagged red")
     eventually(lambda: names() == ["IMG_0002.txt"], "the red-tagged file")
 
 
@@ -758,7 +777,9 @@ def _():
 @test("search: the syntax cheat sheet opens")
 def _():
     start(D)
-    click(one("toggle button", "Search syntax"))
+    t = one("toggle button", "Search syntax")
+    if not activate(t):
+        click(t)
     one(None, contains="wildcard")
 
 
@@ -790,6 +811,62 @@ def _():
     eventually(lambda: all_(contains="weather station"), "the rendered text")
 
 
+@test("preview: a BMP image shows (not just its icon)")
+def _():
+    w, h = 40, 30
+    row_bytes = (w * 3 + 3) & ~3
+    px = b"".join(bytes([x * 6 % 256, y * 8 % 256, 160]) * 1 for y in range(h) for x in range(w))
+    rows = b"".join(px[y * w * 3:(y + 1) * w * 3] + b"\0" * (row_bytes - w * 3) for y in range(h))
+    hdr = struct.pack("<2sIHHI", b"BM", 54 + len(rows), 0, 0, 54) + struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, len(rows), 2835, 2835, 0, 0)
+    open(os.path.join(D, "screen.bmp"), "wb").write(hdr + rows)
+    start(D)
+    select("screen.bmp"); key("space")
+    one("label", "Preview")
+    time.sleep(1.5)
+    assert not all_(contains="No preview for this image format"), "the BMP didn't decode"
+    pics = [n for n in all_("image") if (Atspi.Component.get_extents(n, Atspi.CoordType.WINDOW).height or 0) > 100]
+    assert pics, "no picture in the preview"
+
+
+def make_song(path, freq):
+    """A 6-second song (tagged MP3, or WAV by extension; needs gst-launch-1.0), or None."""
+    enc = ["wavenc"] if path.endswith(".wav") else ["lamemp3enc", "!", "id3v2mux"]
+    r = subprocess.run(["gst-launch-1.0", "-q", "audiotestsrc", "num-buffers=260", f"freq={freq}", "!", "audioconvert", "!",
+                        *enc, "!", "filesink", f"location={path}"], capture_output=True)
+    return path if r.returncode == 0 and os.path.getsize(path) > 0 else None
+
+
+@test("music: MP3 and WAV play, next / previous walk the folder, repeat cycles, a song's end moves on")
+def _():
+    music = os.path.join(D, "Music")
+    os.makedirs(music)
+    if not all(make_song(os.path.join(music, n), f) for n, f in (("a song.mp3", 440), ("b song.wav", 550), ("c song.mp3", 660))):
+        raise Skip("gst-launch-1.0 / lamemp3enc not available to make test songs")
+    extra = os.environ.get("FT_SONG")  # FT_SONG=some.mp3: also a real file (one once crashed GStreamer)
+    if extra:
+        shutil.copy(extra, os.path.join(music, "0 real.mp3"))
+    order = sorted(os.listdir(music))
+    start(music)
+    select(order[0]); key("space")
+    press_button("Play")
+    eventually(lambda: all_("button", "Pause"), "playing (the button turns to Pause)")
+    eventually(lambda: any(" / " in (n.get_name() or "") for n in all_("label")), "the elapsed / total time")
+    time.sleep(1)
+    assert app_proc.poll() is None, "Kestrel crashed while playing"
+    press_button("Next song in this folder")
+    eventually(lambda: all_("label", order[1]), "the next song")
+    press_button("Previous song in this folder")
+    eventually(lambda: all_("label", order[0]), "back to the first song")
+    for want in ("Repeat: this folder", "Repeat: this song", "Repeat: off"):
+        press_button(None, contains="Repeat:")
+        eventually(lambda: all_("button", want), want)
+    if not extra:  # the first song ends and the next (the WAV) starts by itself and plays
+        eventually(lambda: all_("label", order[1]), "the next song after the first ended", timeout=10)
+        eventually(lambda: all_("button", "Pause") and any("0:0" in (n.get_name() or "") and " / " in (n.get_name() or "") for n in all_("label")), "the WAV playing")
+        assert not all_(contains="Can't play this"), "the WAV didn't play"
+    assert app_proc.poll() is None, "Kestrel crashed"
+
+
 @test("preview: a folder shows its size from the index")
 def _():
     index(); start(D)
@@ -810,16 +887,18 @@ def _():
     eventually(lambda: all_(contains="Matches") or any("Matches" in (n.get_description() or "") for n in all_()), "Matches")
 
 
-@test("properties: a permission switch changes the file's mode")
+@test("properties: 'Allow running as a program' sets the execute bit")
 def _():
     p = os.path.join(D, "notes.md")
-    before = os.stat(p).st_mode & 0o777
+    assert not os.stat(p).st_mode & 0o100
     start(D)
     select("notes.md"); key("Alt_L", "Return")
     one(None, "Properties")
-    sw = wait(lambda: [s for s in all_("switch") + all_("toggle button") if "write" in (s.get_name() or "").lower()][0], "a write switch")
-    click(sw)
-    eventually(lambda: os.stat(p).st_mode & 0o777 != before, "a new mode on disk")
+    # the row and the switch inside it share the name; the inner one toggles
+    sw = wait(lambda: all_("switch", "Allow running as a program")[-1], "the switch")
+    if not activate(sw):
+        click(sw)
+    eventually(lambda: os.stat(p).st_mode & 0o100, "the execute bit on disk")
 
 
 # palette, preferences, terminal, scripts, git, open, FileManager1
@@ -902,7 +981,7 @@ def _():
 
 @test("default file manager: FileManager1.ShowItems opens and selects")
 def _():
-    start("--filemanager1")
+    start("--filemanager1", window=False)
     uri = "file://" + os.path.join(D, "report.pdf")
     subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path",
                     "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems", f"['{uri}']", ""],

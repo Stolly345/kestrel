@@ -71,7 +71,7 @@ the results only ever include files you could find yourself.
 
 **Previews**
 - Every image format your system can decode (PNG, JPEG, WebP, AVIF, HEIC, JPEG XL, SVG, BMP, TIFF, GIF, ICO, TGA, QOI…)
-- Video and music in every common codec; music shows its cover art, title, artist and album
+- Video and music in every common codec (MP3, WAV, FLAC, AAC, Opus…); music shows its cover art, title, artist and album, with previous / next through the folder, a seek bar and repeat
 - Text, and Markdown rendered as a page like PDFs
 - Kiwix `.zim` archives (offline Wikipedia and friends): title, description, article count
 - Nextcloud Whiteboard and Excalidraw drawings (`.whiteboard`, `.excalidraw`), drawn
@@ -152,12 +152,13 @@ your default file manager, switch it on in **Preferences**.
 
 ```sh
 sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
-  libvte-2.91-gtk4-dev zlib1g-dev
+  libvte-2.91-gtk4-dev libgstreamer1.0-dev zlib1g-dev
 cargo install cargo-deb
 ```
 
 libgit2 is compiled in; PDF pages use the `poppler-utils` commands and video uses GTK's own
-GStreamer, so none of those need development packages.
+GStreamer. Music plays through Kestrel's own small GStreamer player (audio only, so it needs
+`libgstreamer1.0-dev` to build; at run time just the GStreamer that GNOME already has).
 
 **Rebuilding archive test samples** (only when adding a format):
 
@@ -220,6 +221,14 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   you can't open, Extract and its conflict prompt, Trash) with a throwaway home folder and its
   own small search service, checks 5 results along the way, fails on any GTK warning or error
   page, and saves every screen to `target/ui-check/`.
+- **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
+  shortcuts through the accessibility layer under a virtual display, then checks the result on disk
+  and on screen. 50 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
+  copy/move/rename/trash/restore/delete and name clashes, batch rename, tags, search (typing, type
+  ranking, scopes, tags, content, saved searches, the query language), previews, properties and
+  checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and
+  Show in Folder. Failures leave a screenshot and a dump of what was on screen in
+  `target/feature-test/`. Needs `xvfb` and `python3-xlib`.
 - **`scripts/smoke-live.sh`** (run as yourself; it uses sudo only for a test service) checks live
   updates, permission filtering, excluded folders, and drives mounting and unmounting. Run it
   after any change to `kestrel-indexd` or `kestrel-index`.

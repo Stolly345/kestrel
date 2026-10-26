@@ -421,6 +421,14 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.20 (2026-10-26): music player.** Pressing Play on some MP3s (Alex's "01 Peaceful Slumber.mp3")
+  killed the app: GtkMediaFile always gives GStreamer 1.28's playbin3 a video sink, and decodebin3 then
+  aborts the process (`mq_slot_handle_stream_start: assertion failed: (collection)`; reproduced with
+  gst-launch playbin3 + video-sink, fine with flags=audio). Music now plays through Kestrel's own playbin
+  (gstreamer-rs, flags audio+soft-volume): previous / next through the audio files in the folder, a seek
+  bar with elapsed / total, repeat off / folder / song, and the next song starts when one ends. WAV
+  confirmed. New build dep libgstreamer1.0-dev. GIO "created without standard::content-type" criticals
+  fixed with `browser::content_type`. Feature test: music (MP3 + WAV; FT_SONG=file adds a real one).
 - **v0.9.19 (2026-10-26): drops move.** A drop decided copy vs move from the source's offered actions,
   treating "COPY only" as Ctrl held; drags from the desktop and other apps offer only COPY, so they always
   copied. Now `fileops::drop_intent` reads the keys (Shift move, Ctrl copy) and otherwise drop_op moves on
