@@ -45,6 +45,8 @@ assets = [
     ["../../PLAN.md", "usr/share/doc/kestrel/PLAN.md", "644"],
     ["../../packaging/7zip/7zz", "usr/lib/kestrel/7zz", "755"],
     ["../../packaging/7zip/License.txt", "usr/share/doc/kestrel/7zip-License.txt", "644"],
+    ["../../LICENSE-MIT", "usr/share/doc/kestrel/LICENSE-MIT", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/kestrel/LICENSE-APACHE", "644"],
 ]
 
 [package.metadata.deb.systemd-units]

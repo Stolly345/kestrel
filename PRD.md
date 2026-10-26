@@ -417,3 +417,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   newer majors for any direct dependency. Build-dependency list corrected (readelf -d): build-essential,
   pkg-config, libgtk-4-dev, libadwaita-1-dev, libvte-2.91-gtk4-dev, zlib1g-dev; libgit2 is vendored and the
   libgit2/poppler/gstreamer -dev packages were never needed. Every package named in README exists in 26.04.
+- **Licence + GitHub README (2026-10-26).** Dual-licensed MIT OR Apache-2.0 (Alex's choice; LICENSE-MIT,
+  LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
+  docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
+  published yet: Alex reviews first; screenshots still to be taken.
