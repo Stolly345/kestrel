@@ -10,9 +10,12 @@ mod prefs;
 mod preview;
 mod props;
 mod query_ui;
+mod rename;
+mod scripts;
 mod search;
 mod sidebar;
 mod tags;
+mod term;
 mod thumbs;
 mod window;
 
@@ -22,6 +25,10 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 const CSS: &str = "
+levelbar.usage block.used { background: @accent_bg_color; }
+levelbar.usage block.nearly-full { background: @error_bg_color; }
+levelbar.usage trough { min-height: 4px; }
+levelbar.usage block { min-height: 4px; }
 .inactive-pane tabbar, .inactive-pane .statusbar { opacity: 0.55; }
 .miller-col { border-right: 1px solid alpha(currentColor, 0.12); }
 .statusbar { min-height: 22px; }
@@ -68,6 +75,7 @@ const ACCELS: &[(&str, &[&str])] = &[
     ("win.palette", &["<Control><Shift>p"]),
     ("win.preferences", &["<Control>comma"]),
     ("win.preview", &["<Alt>p"]),
+    ("win.terminal-panel", &["<Control>grave"]),
     ("win.sidebar", &["F9"]),
     ("win.focus-next-region", &["F6"]),
     ("win.focus-prev-region", &["<Shift>F6"]),

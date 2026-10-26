@@ -390,3 +390,14 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Search: a bare `.deb` ranks .deb files first (no more vnd.efi.iso.xml above the ISOs); bare `pdf`, `word`, `excel`,
   `powerpoint`, `spreadsheet`, `presentation` also match files of that type and rank them first (`budget excel` finds
   Budget.xlsx). Ranking is daemon-side (`Query::boost`); smoke-live 15/15 as Alex on 0.9.12.
+- **v0.9.13 (2026-10-26): checksums, archive browsing, drive space, links, scripts, batch rename, terminal.**
+  Properties → Checksums (MD5/SHA-1/SHA-256 on request, paste to compare). Double-click opens zip/7z/rar/tarballs as
+  folders (GVfs archive://, needs gvfs-backends; packages, books, disk images still open in their apps). Sidebar
+  free-space bars (File System + drives; red past 90 %). Symlink badge in the list; status bar shows "→ target" or
+  "N hard links". Right-click → Scripts runs ~/.local/share/nautilus/scripts the Nautilus way (args, cwd,
+  NAUTILUS_SCRIPT_* env). Copy/move no longer stops at the first failure: the rest go through, one dialog lists the
+  failures. Batch rename (Rename with several selected): find/replace or regex with $1, case, numbering, live
+  preview with clash checks, swaps/chains handled, one Undo. Terminal panel (Ctrl+`, F4 is other-pane): vte4 0.10;
+  views cd the shell (only at its prompt, terminal not focused; Ctrl+U + leading-space cd), the shell's cwd (polled
+  from /proc, any shell) moves the view; `exit` closes it. New dependency: libvte-2.91-gtk4-0 (auto via shlibs);
+  build needs libvte-2.91-gtk4-dev. Unit-tested (40); not click-tested.

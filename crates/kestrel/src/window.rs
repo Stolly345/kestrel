@@ -110,6 +110,7 @@ pub struct Win {
     bg_menu: gio::MenuModel,
     pub sidebar: Rc<Sidebar>,
     preview: crate::preview::Preview,
+    term: Rc<crate::term::Term>,
     show_hidden: Cell<bool>,
     me: Weak<Win>,
 }
@@ -143,6 +144,9 @@ fn menus() -> (gio::Menu, gio::Menu) {
     s.append(Some("Extract Here"), Some("win.extract"));
     s.append(Some("Extract To…"), Some("win.extract-to"));
     s.append(Some("Browse Archive"), Some("win.browse-archive"));
+    item.append_section(None, &s);
+    let s = gio::Menu::new();
+    crate::scripts::watch(&s);
     item.append_section(None, &s);
     let s = gio::Menu::new();
     s.append(Some("Copy Path"), Some("win.copy-path"));
@@ -399,7 +403,14 @@ impl Win {
         main.add_top_bar(&bar.chips);
         // file-operation progress: what's running, how far, time left, Cancel
         main.add_bottom_bar(&ops.bar);
-        main.set_content(Some(&content));
+        // the shell's `cd`s move the current tab
+        let term_me = me.clone();
+        let term = crate::term::Term::new(&content, move |dir| {
+            if let Some(w) = term_me.upgrade() {
+                w.navigate(gio::File::for_path(dir));
+            }
+        });
+        main.set_content(Some(&term.paned));
 
         let side = adw::ToolbarView::new();
         let side_header = adw::HeaderBar::builder().title_widget(&adw::WindowTitle::new("Kestrel", "")).build();
@@ -436,6 +447,7 @@ impl Win {
             bg_menu: bg_menu.upcast(),
             sidebar,
             preview,
+            term,
             show_hidden: Cell::new(false),
             me,
         }
@@ -582,7 +594,7 @@ impl Win {
             ("copy", any),
             ("copy-other", any),
             ("move-other", any),
-            ("rename", infos.len() == 1 && !trash),
+            ("rename", any && !trash),
             ("trash", any && !trash),
             ("restore", any && trash),
             ("empty-trash", trash),
@@ -619,6 +631,7 @@ impl Win {
         self.refresh_preview();
         self.update_actions();
         let Some(b) = self.current() else { return };
+        self.term.follow(b.dir().and_then(|d| d.path()));
         self.back_btn.set_sensitive(b.can_back());
         self.fwd_btn.set_sensitive(b.can_forward());
         self.window.set_title(Some(&format!("{} — Kestrel", b.title())));
@@ -1139,10 +1152,15 @@ impl Win {
             });
         }
         self.act("rename", |w| {
+            let sel = w.sel();
+            if sel.len() > 1 {
+                crate::rename::show(&w.ops, sel);
+                return;
+            }
             if w.current().is_some_and(|b| b.rename_inline()) {
                 return;
             }
-            if let Some(f) = w.sel().into_iter().next() {
+            if let Some(f) = sel.into_iter().next() {
                 w.ops.rename(f);
             }
         });
@@ -1185,6 +1203,7 @@ impl Win {
                 }
             }
         });
+        self.act("terminal-panel", |w| w.term.toggle(w.current().and_then(|b| b.dir()).and_then(|d| d.path())));
         self.act("terminal", |w| {
             let Some(dir) = w.target_dir().and_then(|d| d.path()) else {
                 w.ops.toast("Not a local folder");
@@ -1301,9 +1320,21 @@ impl Win {
         self.act("browse-archive", |w| {
             if let Some(f) = w.sel().into_iter().next() {
                 // GVfs' archive backend mounts it; Browser::show handles the mount
-                w.navigate(gio::File::for_uri(&format!("archive://{}", glib::Uri::escape_string(&f.uri(), None, false))));
+                w.navigate(crate::fileops::archive_root(&f));
             }
         });
+        let me = self.me.clone();
+        let a = gio::SimpleAction::new("script", Some(glib::VariantTy::STRING));
+        a.connect_activate(move |_, v| {
+            let (Some(w), Some(script)) = (me.upgrade(), v.and_then(|v| v.get::<String>())) else {
+                return;
+            };
+            let Some(dir) = w.current().and_then(|b| b.dir()) else { return };
+            if let Err(e) = crate::scripts::run(std::path::Path::new(&script), &w.sel(), &dir) {
+                w.ops.toast(&format!("Couldn't run the script: {e}"));
+            }
+        });
+        self.window.add_action(&a);
         let me = self.me.clone();
         let a = gio::SimpleAction::new("tag", Some(glib::VariantTy::STRING));
         a.connect_activate(move |_, v| {

@@ -11,7 +11,7 @@ use kestrel_index::Sort;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-pub const ATTRS: &str = "standard::*,time::modified,unix::mode,owner::user,xattr::*,thumbnail::path,thumbnail::is-valid,id::filesystem";
+pub const ATTRS: &str = "standard::*,time::modified,unix::mode,unix::nlink,owner::user,xattr::*,thumbnail::path,thumbnail::is-valid,id::filesystem";
 
 /// What a tab is told to show (CLI, session, sidebar).
 #[derive(Clone, Debug)]
@@ -424,6 +424,20 @@ fn label_factory(b: &Weak<Browser>, xalign: f32, text: impl Fn(&gio::FileInfo) -
     )
 }
 
+/// " · → /target" for a symlink, " · 3 hard links" for a file with other names.
+fn link_note(info: &gio::FileInfo) -> String {
+    if info.is_symlink() {
+        let t = info.symlink_target().map(|t| t.display().to_string()).unwrap_or_default();
+        return format!(" · \u{2192} {t}");
+    }
+    let n = info.attribute_uint32("unix::nlink");
+    if n > 1 && info.file_type() == gio::FileType::Regular {
+        format!(" · {n} hard links")
+    } else {
+        String::new()
+    }
+}
+
 /// Thumbnail if one is cached (ours or Nautilus'), else the type icon.
 pub fn set_icon(img: &gtk::Image, info: &gio::FileInfo) {
     if info.boolean("thumbnail::is-valid")
@@ -483,6 +497,8 @@ impl Browser {
                         .ellipsize(gtk::pango::EllipsizeMode::Middle)
                         .build(),
                 );
+                // symlink badge; the status bar shows where it points
+                row.append(&gtk::Image::builder().icon_name("emblem-symbolic-link").pixel_size(16).visible(false).build());
                 row.append(&gtk::Box::builder().spacing(3).build());
                 row.upcast()
             },
@@ -497,6 +513,10 @@ impl Browser {
                     label.set_text(&info.display_name());
                 } else {
                     label.set_markup(&crate::query_ui::highlight_markup(&info.display_name(), &terms));
+                }
+                if let Some(link) = label.next_sibling().and_downcast::<gtk::Image>() {
+                    link.set_visible(info.is_symlink());
+                    link.set_tooltip_text(info.symlink_target().map(|t| format!("Link to {}", t.display())).as_deref());
                 }
                 crate::tags::fill_dots(&w.last_child().and_downcast::<gtk::Box>().unwrap(), crate::tags::of_info(info));
             },
@@ -1693,6 +1713,9 @@ impl Browser {
             let infos = self.selected_infos();
             let bytes: u64 = infos.iter().take(10_000).filter(|i| !is_dirlike(i)).map(|i| i.size() as u64).sum();
             s += &format!(" · {} selected ({})", thousands(sel), glib::format_size(bytes));
+            if let [one] = infos.as_slice() {
+                s += &link_note(one);
+            }
         }
         self.statusbar.set_text(&s);
     }
@@ -1716,7 +1739,16 @@ impl Browser {
                 self.focus_view();
             }
         } else if let Some(f) = info_file(info) {
-            self.launch(&f, false);
+            // GVfs' archive backend is in gvfs-backends (Recommends); without it, open in an app
+            if f.is_native()
+                && crate::fileops::browse_on_open(&info.name().to_string_lossy())
+                && std::path::Path::new("/usr/libexec/gvfsd-archive").exists()
+            {
+                self.go(Loc::Dir(crate::fileops::archive_root(&f)));
+                self.focus_view();
+            } else {
+                self.launch(&f, false);
+            }
         }
     }
 

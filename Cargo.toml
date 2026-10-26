@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/kestrel-index", "crates/kestrel-indexd", "crates/ks", "crates/kestrel"]
 
 [workspace.package]
-version = "0.9.12"
+version = "0.9.13"
 edition = "2024"
 license = "MIT"
 

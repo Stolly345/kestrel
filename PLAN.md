@@ -69,7 +69,7 @@ Index: whole system, root daemon, results filtered per caller. Local disks only 
 ## Needs Alex (sudo)
 ```
 sudo apt install libgtk-4-dev libadwaita-1-dev libgit2-dev libpoppler-glib-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libvte-2.91-gtk4-dev pkg-config
 ```
 
 ## As built (2026-10-25)

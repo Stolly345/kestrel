@@ -34,13 +34,15 @@ pub enum Conflict {
     Replace,
 }
 
-/// Outcome of a transfer: (src, dst) pairs done, and paths of items replaced (now in the trash).
+/// Outcome of a transfer: (src, dst) pairs done, paths of items replaced (now in the trash),
+/// and "name: why" for each item that failed (the rest still went through).
 pub struct Transferred {
     pub pairs: Vec<(gio::File, gio::File)>,
     pub replaced: Vec<PathBuf>,
+    pub failed: Vec<String>,
 }
 
-struct Progress {
+pub(crate) struct Progress {
     done: AtomicU64,
     total: AtomicU64,
     /// Set by work that can stop midway (extracting): shows the Cancel button.
@@ -143,15 +145,18 @@ pub fn delete_tree(f: &gio::File) -> Result<(), glib::Error> {
     f.delete(gio::Cancellable::NONE)
 }
 
-/// Copy or move `srcs` into `dest`. Returns (src, dst) pairs actually done.
-fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &Progress) -> Result<Transferred, String> {
+/// Copy or move `srcs` into `dest`. An item that fails (permissions, a locked file, a full
+/// disk) is noted and skipped; the others still go through.
+fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &Progress) -> Transferred {
     p.total.store(srcs.iter().map(du).sum(), Ordering::Relaxed);
     let mut done = Vec::new();
     let mut replaced = Vec::new();
+    let mut failed = Vec::new();
     for src in srcs {
         let name = src.basename().unwrap_or_default().to_string_lossy().into_owned();
         if dest.equal(src) || dest.has_prefix(src) {
-            return Err(format!("Can't put \u{201c}{name}\u{201d} inside itself"));
+            failed.push(format!("{name}: can't go inside itself"));
+            continue;
         }
         if op == Op::Move && src.parent().is_some_and(|d| d.equal(dest)) {
             continue;
@@ -168,7 +173,10 @@ fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &
                 Conflict::KeepBoth => unique_child(dest, &name),
                 Conflict::Skip => continue,
                 Conflict::Replace => {
-                    target.trash(gio::Cancellable::NONE).map_err(|e| format!("{name}: {}", e.message()))?;
+                    if let Err(e) = target.trash(gio::Cancellable::NONE) {
+                        failed.push(format!("{name}: couldn't move the existing one to the trash ({})", e.message()));
+                        continue;
+                    }
                     replaced.extend(target.path());
                     target
                 }
@@ -187,10 +195,12 @@ fn transfer(op: Op, srcs: &[gio::File], dest: &gio::File, policy: Conflict, p: &
                 r => r,
             },
         };
-        r.map_err(|e| format!("{name}: {}", e.message()))?;
-        done.push((src.clone(), dst));
+        match r {
+            Ok(()) => done.push((src.clone(), dst)),
+            Err(e) => failed.push(format!("{name}: {}", e.message())),
+        }
     }
-    Ok(Transferred { pairs: done, replaced })
+    Transferred { pairs: done, replaced, failed }
 }
 
 /// The home trash (freedesktop spec): files/ holds the items, info/NAME.trashinfo where each came from.
@@ -497,6 +507,25 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".simg",
 ];
 
+/// The inside of an archive as a folder (GVfs' archive backend mounts it; Browser::show
+/// handles the mount).
+pub fn archive_root(f: &gio::File) -> gio::File {
+    gio::File::for_uri(&format!("archive://{}", glib::Uri::escape_string(&f.uri(), None, false)))
+}
+
+/// Double-click opens these as folders. Packages, books and disk images still open in their
+/// apps (software installer, e-book reader, Disks); Browse Archive works on them too.
+pub fn browse_on_open(name: &str) -> bool {
+    const IN_APP: &[&str] = &[
+        ".deb", ".udeb", ".rpm", ".msi", ".msp", ".apk", ".jar", ".war", ".whl", ".xpi", ".crx", ".ipa", ".appx", ".pkg", ".epub", ".cbz", ".chm", ".ova",
+    ];
+    archive_ext(name).is_some_and(|e| {
+        let lower = name.to_lowercase();
+        let image = ARCHIVE_EXTS.iter().position(|x| *x == ".iso").is_some_and(|i| ARCHIVE_EXTS[i..].contains(&e));
+        !image && !IN_APP.iter().any(|x| lower.ends_with(x))
+    })
+}
+
 /// The `ARCHIVE_EXTS` entry `name` ends with, if any.
 pub fn archive_ext(name: &str) -> Option<&'static str> {
     let lower = name.to_lowercase();
@@ -761,7 +790,7 @@ fn outcome(ok: bool, msgs: &str) -> Result<usize, ExtractErr> {
     let last = errors
         .last()
         .copied()
-        .or_else(|| msgs.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "ERRORS:").last());
+        .or_else(|| msgs.lines().map(str::trim).rfind(|l| !l.is_empty() && *l != "ERRORS:"));
     Err(ExtractErr::Other(last.unwrap_or("failed").to_string()))
 }
 
@@ -823,18 +852,23 @@ impl Ops {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
 
-    fn toast_undo(&self, msg: &str, undo: Undo) {
+    pub(crate) fn toast_undo(&self, msg: &str, undo: Undo) {
         self.undo.borrow_mut().push(undo);
         self.toasts
             .add_toast(adw::Toast::builder().title(msg).button_label("Undo").action_name("win.undo").build());
     }
 
-    fn window(&self) -> Option<gtk::Window> {
+    pub(crate) fn window(&self) -> Option<gtk::Window> {
         self.toasts.root().and_downcast()
     }
 
     /// Run `work` on a worker thread with a live progress bar, then `then` on the main thread.
-    fn job<T: Send + 'static>(self: &Rc<Self>, title: String, work: impl FnOnce(&Progress) -> T + Send + 'static, then: impl FnOnce(&Rc<Ops>, T) + 'static) {
+    pub(crate) fn job<T: Send + 'static>(
+        self: &Rc<Self>,
+        title: String,
+        work: impl FnOnce(&Progress) -> T + Send + 'static,
+        then: impl FnOnce(&Rc<Ops>, T) + 'static,
+    ) {
         let p = Arc::new(Progress::default());
         let (bar, cancel, detail) = (self.progress.clone(), self.cancel.clone(), self.detail.clone());
         bar.set_fraction(0.0);
@@ -925,9 +959,15 @@ impl Ops {
         self.job(
             format!("{} {}", if op == Op::Copy { "Copying" } else { "Moving" }, plural(srcs.len(), "item")),
             move |p| transfer(op, &srcs, &dest, policy, p),
-            move |me, r| match r {
-                Ok(t) if t.pairs.is_empty() => me.toast("Nothing to do"),
-                Ok(Transferred { pairs, replaced }) => {
+            move |me, Transferred { pairs, replaced, failed }| {
+                if !failed.is_empty() {
+                    me.report_failures(if op == Op::Copy { "Copy" } else { "Move" }, pairs.len(), &failed);
+                }
+                if pairs.is_empty() {
+                    if failed.is_empty() {
+                        me.toast("Nothing to do");
+                    }
+                } else {
                     let mut msg = format!("{} {}", if op == Op::Copy { "Copied" } else { "Moved" }, plural(pairs.len(), "item"));
                     if !replaced.is_empty() {
                         msg += &format!(", replaced {}", replaced.len());
@@ -944,9 +984,43 @@ impl Ops {
                     };
                     me.toast_undo(&msg, undo);
                 }
-                Err(e) => me.toast(&e),
             },
         );
+    }
+
+    /// One dialog listing every item that failed, after the rest went through.
+    fn report_failures(&self, what: &str, done: usize, failed: &[String]) {
+        let heading = format!(
+            "{} couldn\u{2019}t be {}",
+            plural(failed.len(), "item"),
+            if what == "Copy" { "copied" } else { "moved" }
+        );
+        let body = if done > 0 {
+            format!("The other {} went through.", plural(done, "item"))
+        } else {
+            String::new()
+        };
+        let d = adw::AlertDialog::new(Some(&heading), Some(&body));
+        let tv = gtk::TextView::builder()
+            .editable(false)
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(6)
+            .bottom_margin(6)
+            .left_margin(6)
+            .right_margin(6)
+            .css_classes(["card"])
+            .build();
+        tv.buffer().set_text(&failed.join("\n"));
+        d.set_extra_child(Some(
+            &gtk::ScrolledWindow::builder()
+                .child(&tv)
+                .min_content_height(60)
+                .max_content_height(240)
+                .propagate_natural_height(true)
+                .build(),
+        ));
+        d.add_response("ok", "OK");
+        d.present(self.window().as_ref());
     }
 
     pub fn trash(self: &Rc<Self>, files: Vec<gio::File>) {
@@ -1434,13 +1508,11 @@ mod tests {
         let d = tmp("copy");
         let p = Progress::default();
         let (src, dst) = (d.child("src"), d.child("dst"));
-        let pairs = transfer(Op::Copy, &[src.child("a.txt"), src.child("sub")], &dst, Conflict::KeepBoth, &p)
-            .unwrap()
-            .pairs;
+        let pairs = transfer(Op::Copy, &[src.child("a.txt"), src.child("sub")], &dst, Conflict::KeepBoth, &p).pairs;
         assert_eq!(pairs.len(), 2);
         assert!(exists(&dst.child("sub/b.txt")), "recursive copy");
         assert_eq!(p.total.load(Ordering::Relaxed), 6);
-        let again = transfer(Op::Copy, &[src.child("a.txt")], &dst, Conflict::KeepBoth, &p).unwrap().pairs;
+        let again = transfer(Op::Copy, &[src.child("a.txt")], &dst, Conflict::KeepBoth, &p).pairs;
         assert_eq!(again[0].1.basename().unwrap().to_str(), Some("a (2).txt"), "second copy gets a new name");
         assert_eq!(std::fs::read_to_string(dst.child("a.txt").path().unwrap()).unwrap(), "aaaa");
         delete_tree(&d).unwrap();
@@ -1452,14 +1524,19 @@ mod tests {
         let d = tmp("move");
         let p = Progress::default();
         let (src, dst) = (d.child("src"), d.child("dst"));
-        let pairs = transfer(Op::Move, &[src.child("sub")], &dst, Conflict::KeepBoth, &p).unwrap().pairs;
+        let pairs = transfer(Op::Move, &[src.child("sub")], &dst, Conflict::KeepBoth, &p).pairs;
         assert!(exists(&dst.child("sub/b.txt")) && !exists(&src.child("sub")));
         assert!(
-            transfer(Op::Move, &[dst.child("sub")], &dst, Conflict::KeepBoth, &p).unwrap().pairs.is_empty(),
+            transfer(Op::Move, &[dst.child("sub")], &dst, Conflict::KeepBoth, &p).pairs.is_empty(),
             "move into own parent is a no-op"
         );
-        let err = transfer(Op::Move, &[dst.clone()], &dst.child("sub"), Conflict::KeepBoth, &p).err().unwrap();
-        assert!(err.contains("inside itself"), "{err}");
+        let t = transfer(Op::Move, &[dst.clone()], &dst.child("sub"), Conflict::KeepBoth, &p);
+        assert!(t.pairs.is_empty() && t.failed[0].contains("inside itself"), "{:?}", t.failed);
+        // one bad item doesn't stop the rest
+        let t = transfer(Op::Copy, &[src.child("missing"), dst.child("sub/b.txt")], &src, Conflict::KeepBoth, &p);
+        assert_eq!((t.pairs.len(), t.failed.len()), (1, 1), "{:?}", t.failed);
+        assert!(t.failed[0].starts_with("missing:"));
+        delete_tree(&t.pairs[0].1).unwrap();
         run_undo(Undo::Moved(pairs)).unwrap();
         assert!(exists(&src.child("sub/b.txt")) && !exists(&dst.child("sub")), "undo moves it back");
 
@@ -1502,13 +1579,13 @@ mod tests {
         assert_eq!(conflicts(&a, &dst), ["a.txt"]);
         assert!(conflicts(&a, &src).is_empty(), "same folder is never a conflict");
 
-        assert!(transfer(Op::Copy, &a, &dst, Conflict::Skip, &p).unwrap().pairs.is_empty());
+        assert!(transfer(Op::Copy, &a, &dst, Conflict::Skip, &p).pairs.is_empty());
         assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "old");
 
-        let t = transfer(Op::Copy, &a, &dst, Conflict::KeepBoth, &p).unwrap();
+        let t = transfer(Op::Copy, &a, &dst, Conflict::KeepBoth, &p);
         assert_eq!(t.pairs[0].1.basename().unwrap().to_str(), Some("a (2).txt"));
 
-        let t = transfer(Op::Copy, &a, &dst, Conflict::Replace, &p).unwrap();
+        let t = transfer(Op::Copy, &a, &dst, Conflict::Replace, &p);
         assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "new");
         assert_eq!(t.replaced, [base.join("dst/a.txt")]);
         // undo: copy removed, the replaced original back from the trash
@@ -1566,6 +1643,12 @@ mod tests {
         assert_eq!(archive_ext("Photos.TAR.GZ"), Some(".tar.gz"));
         assert_eq!(archive_ext("disk.iso"), Some(".iso"));
         assert_eq!(archive_ext("report.docx"), None);
+        for n in ["a.zip", "b.7z", "c.tar.gz", "d.part1.rar", "e.gz"] {
+            assert!(browse_on_open(n), "{n}");
+        }
+        for n in ["a.deb", "b.iso", "c.epub", "d.qcow2", "e.docx", "f.whl"] {
+            assert!(!browse_on_open(n), "{n}");
+        }
     }
 
     #[test]

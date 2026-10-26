@@ -28,6 +28,112 @@ fn when(info: &gio::FileInfo, attr: &str) -> String {
         .unwrap_or_default()
 }
 
+/// MD5, SHA-1 and SHA-256 of the file, read once in 1 MB chunks.
+pub fn hashes(path: &std::path::Path, read: &std::sync::atomic::AtomicU64) -> std::io::Result<[String; 3]> {
+    use std::io::Read;
+    let kinds = [glib::ChecksumType::Md5, glib::ChecksumType::Sha1, glib::ChecksumType::Sha256];
+    let mut sums = kinds.map(|k| glib::Checksum::new(k).unwrap());
+    let mut f = std::fs::File::open(path)?;
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        sums.iter_mut().for_each(|s| s.update(&buf[..n]));
+        read.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(sums.map(|s| s.string().unwrap().to_string()))
+}
+
+/// Calculated on request (a 3 GB ISO takes a while); paste a published hash to compare.
+fn checksums(path: std::path::PathBuf) -> adw::PreferencesGroup {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let g = adw::PreferencesGroup::builder()
+        .title("Checksums")
+        .description("Paste a published checksum to check a download")
+        .build();
+    let calc = gtk::Button::builder().label("Calculate").valign(gtk::Align::Center).build();
+    g.set_header_suffix(Some(&calc));
+    let rows: Vec<adw::ActionRow> = ["MD5", "SHA-1", "SHA-256"]
+        .into_iter()
+        .map(|k| {
+            let r = adw::ActionRow::builder()
+                .title(k)
+                .subtitle_selectable(true)
+                .css_classes(["property", "monospace"])
+                .visible(false)
+                .build();
+            g.add(&r);
+            r
+        })
+        .collect();
+    let verify = adw::EntryRow::builder().title("Compare with").build();
+    let verdict = gtk::Image::new();
+    verify.add_suffix(&verdict);
+    g.add(&verify);
+    let sums: std::rc::Rc<std::cell::RefCell<Option<[String; 3]>>> = Default::default();
+    let check = {
+        let (sums, verify, verdict) = (sums.clone(), verify.clone(), verdict.clone());
+        move || {
+            let want = verify.text().trim().to_lowercase();
+            let (icon, tip) = match sums.borrow().as_ref() {
+                _ if want.is_empty() => ("", ""),
+                None => ("", ""),
+                Some(s) if s.contains(&want) => ("emblem-ok-symbolic", "Matches"),
+                Some(_) => ("dialog-warning-symbolic", "Doesn't match any of these checksums"),
+            };
+            verdict.set_icon_name(Some(icon).filter(|i| !i.is_empty()));
+            verdict.set_tooltip_text(Some(tip));
+            verdict.set_css_classes(if icon.starts_with("emblem") { &["success"] } else { &["error"] });
+        }
+    };
+    let run = {
+        let (calc, rows, sums, check) = (calc.clone(), rows.clone(), sums.clone(), check.clone());
+        std::rc::Rc::new(move || {
+            if sums.borrow().is_some() || !calc.is_sensitive() {
+                return;
+            }
+            calc.set_sensitive(false);
+            let size = std::fs::metadata(&path).map_or(0, |m| m.len()).max(1);
+            let read = std::sync::Arc::new(AtomicU64::new(0));
+            let (r2, c2) = (read.clone(), calc.clone());
+            let tick = glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+                c2.set_label(&format!("{}%", r2.load(Ordering::Relaxed) * 100 / size));
+                glib::ControlFlow::Continue
+            });
+            let (path, calc, rows, sums, check) = (path.clone(), calc.clone(), rows.clone(), sums.clone(), check.clone());
+            glib::spawn_future_local(async move {
+                // ponytail: keeps reading if the dialog closes mid-way; add a cancel flag if that bites
+                let r = gio::spawn_blocking(move || hashes(&path, &read)).await;
+                tick.remove();
+                match r {
+                    Ok(Ok(h)) => {
+                        for (row, v) in rows.iter().zip(&h) {
+                            row.set_subtitle(v);
+                            row.set_visible(true);
+                        }
+                        *sums.borrow_mut() = Some(h);
+                        calc.set_visible(false);
+                        check();
+                    }
+                    Ok(Err(e)) => calc.set_label(&e.to_string()),
+                    Err(_) => calc.set_label("Failed"),
+                }
+            });
+        })
+    };
+    let r = run.clone();
+    calc.connect_clicked(move |_| r());
+    verify.connect_changed(move |e| {
+        if !e.text().trim().is_empty() {
+            run();
+        }
+        check();
+    });
+    g
+}
+
 pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) + 'static) {
     let page = adw::PreferencesPage::new();
     let g = adw::PreferencesGroup::new();
@@ -114,6 +220,11 @@ pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: im
             if let Some(app) = gio::AppInfo::default_for_type(&ct, false) {
                 action_row(&g, "Opens With", &app.display_name());
             }
+            if info.file_type() == gio::FileType::Regular
+                && let Some(path) = f.path()
+            {
+                page.add(&checksums(path));
+            }
         }
         many => {
             title = format!("{} items", many.len());
@@ -131,4 +242,20 @@ pub fn show(parent: &impl IsA<gtk::Widget>, infos: Vec<gio::FileInfo>, toast: im
         .content_height(560)
         .build()
         .present(Some(parent));
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hashes_of_abc() {
+        let p = std::env::temp_dir().join(format!("kestrel-hash-{}", std::process::id()));
+        std::fs::write(&p, "abc").unwrap();
+        let read = std::sync::atomic::AtomicU64::new(0);
+        let h = super::hashes(&p, &read).unwrap();
+        assert_eq!(h[0], "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(h[1], "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(h[2], "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(read.into_inner(), 3);
+        std::fs::remove_file(p).unwrap();
+    }
 }

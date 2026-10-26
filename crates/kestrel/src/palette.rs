@@ -41,6 +41,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Copy path", "win.copy-path", None),
     ("Add bookmark", "win.add-bookmark", None),
     ("Open terminal here", "win.terminal", None),
+    ("Terminal panel", "win.terminal-panel", None),
     ("Properties", "win.properties", None),
     ("Compress…", "win.compress", None),
     ("Extract here", "win.extract", None),

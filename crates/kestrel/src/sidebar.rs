@@ -139,6 +139,51 @@ fn row(icon: &str, label: &str) -> (gtk::ListBoxRow, gtk::Box) {
     (r, b)
 }
 
+/// A thin used-space bar under the row's name, and "X free of Y" as its tooltip. Asked
+/// asynchronously: a dead network mount must never stall the sidebar.
+// ponytail: read when the device list is (re)built, not live; poll if a filling disk should update it
+fn usage_bar(row: &gtk::ListBoxRow, b: &gtk::Box, root: gio::File) {
+    let Some(label) = b.first_child().and_then(|i| i.next_sibling()) else {
+        return;
+    };
+    let col = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(3)
+        .hexpand(true)
+        .valign(gtk::Align::Center)
+        .build();
+    b.remove(&label);
+    col.append(&label);
+    let bar = gtk::LevelBar::builder().visible(false).height_request(4).build();
+    bar.add_css_class("usage");
+    col.append(&bar);
+    b.insert_child_after(&col, b.first_child().as_ref());
+    let row = row.downgrade();
+    glib::spawn_future_local(async move {
+        let Ok(fs) = root
+            .query_filesystem_info_future("filesystem::size,filesystem::free", glib::Priority::LOW)
+            .await
+        else {
+            return;
+        };
+        let (size, free) = (fs.attribute_uint64("filesystem::size"), fs.attribute_uint64("filesystem::free"));
+        if size == 0 {
+            return;
+        }
+        // accent colour, red past 90 % full (CSS in main.rs)
+        for o in ["low", "high", "full"] {
+            bar.remove_offset_value(Some(o));
+        }
+        bar.add_offset_value("used", 0.9);
+        bar.add_offset_value("nearly-full", 1.0);
+        bar.set_value(1.0 - free as f64 / size as f64);
+        bar.set_visible(true);
+        if let Some(r) = row.upgrade() {
+            r.set_tooltip_text(Some(&format!("{} free of {}", glib::format_size(free), glib::format_size(size))));
+        }
+    });
+}
+
 fn section(title: &str) -> gtk::Label {
     gtk::Label::builder()
         .label(title)
@@ -202,8 +247,11 @@ impl Sidebar {
             ("drive-harddisk-symbolic", "File System", "file:///"),
             ("network-workgroup-symbolic", "Network", "network:///"),
         ] {
-            let (r, _) = row(icon, label);
+            let (r, b) = row(icon, label);
             r.set_widget_name(uri);
+            if uri == "file:///" {
+                usage_bar(&r, &b, gio::File::for_uri(uri));
+            }
             if uri.starts_with("trash:") || uri.starts_with("file:") {
                 droppable(&r, gio::File::for_uri(uri), &drop);
             }
@@ -346,6 +394,7 @@ impl Sidebar {
             }
             let nav = self.navigate.clone();
             let root = m.root();
+            usage_bar(&r, &b, root.clone());
             let g = gtk::GestureClick::new();
             droppable(&r, root.clone(), &self.drop);
             g.connect_released(move |_, _, _, _| nav(Loc::Dir(root.clone())));
