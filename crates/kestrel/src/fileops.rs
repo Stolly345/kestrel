@@ -697,20 +697,40 @@ fn parse_tar_tv(text: &str) -> Vec<Entry> {
 }
 
 /// `7zz l -slt` blocks ("Path = …", "Folder = +", "Size = …") after the "----------" line.
+/// A single compressed stream (.xz, .lzma, a .deb's data.tar.xz…) has no Path: 7-Zip names it
+/// after the innermost layer, minus its extension ("data.tar.xz" → "data.tar"), as Extract does.
+/// Some formats (XAR) don't mark folders: an entry with entries under it is one.
 fn parse_7z_slt(text: &str) -> Vec<Entry> {
-    let Some((_, body)) = text.split_once("\n----------\n") else {
+    let Some((head, body)) = text.split_once("\n----------\n") else {
         return Vec::new();
     };
-    body.split("\n\n")
+    let layer = head.lines().filter_map(|l| l.strip_prefix("Path = ")).next_back().unwrap_or_default();
+    let layer = Path::new(layer).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+    let unnamed = layer.rsplit_once('.').map_or(layer.as_str(), |(stem, _)| stem).to_string();
+    let blocks: Vec<&str> = body.split("\n\n").filter(|b| b.contains(" = ")).collect();
+    // only a lone entry is an unnamed stream; disk images add pathless info blocks after theirs
+    let lone = blocks.len() == 1;
+    let mut entries: Vec<Entry> = blocks
+        .into_iter()
         .filter_map(|block| {
             let field = |k: &str| block.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(" = "));
+            let path = match field("Path") {
+                Some(p) => p.to_string(),
+                None if lone => unnamed.clone(),
+                None => return None,
+            };
             Some(Entry {
-                path: field("Path")?.to_string(),
+                path,
                 size: field("Size").and_then(|s| s.parse().ok()).unwrap_or(0),
                 dir: field("Folder") == Some("+") || field("Attributes").is_some_and(|a| a.starts_with('D')),
             })
         })
-        .collect()
+        .collect();
+    let parents: std::collections::HashSet<String> = entries.iter().filter_map(|e| e.path.rsplit_once('/').map(|(d, _)| d.to_string())).collect();
+    for e in &mut entries {
+        e.dir |= parents.contains(&e.path);
+    }
+    entries
 }
 
 /// Why extracting failed: a missing/wrong password (ask for one), the Cancel button, or anything else.
@@ -1679,14 +1699,15 @@ mod tests {
             ".r00" => "oldrar.r00".to_string(),
             e => format!("sample{e}"),
         };
-        // packages keep their own layout, disk images and .dmg hold a whole file system image,
+        // packages keep their own layout (7-Zip gives a .deb's data.tar, an .rpm's .cpio);
         // LZH/CHM/old-style RAR are downloaded real-world files
-        const NO_HELLO: &[&str] = &[
-            ".deb", ".udeb", ".rpm", ".lzh", ".lha", ".chm", ".r00", ".dmg", ".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2", ".simg",
-        ];
+        const NO_HELLO: &[&str] = &[".deb", ".udeb", ".rpm", ".lzh", ".lha", ".chm", ".r00"];
         let work = std::env::temp_dir().join(format!("kestrel-formats-{}", std::process::id()));
         let (mut missing, mut failed) = (Vec::new(), Vec::new());
+        // one line per format; shown with `cargo test every_format -- --nocapture`
+        let mut report = Vec::new();
         for (i, ext) in ARCHIVE_EXTS.iter().enumerate() {
+            let before = failed.len();
             let f = dir.join(sample(ext));
             if !f.exists() {
                 missing.push(*ext);
@@ -1709,26 +1730,49 @@ mod tests {
             }
             let mut files = Vec::new();
             walk(&out, &mut files);
+            let hello = files.iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"Hello from Kestrel\n"));
             if files.is_empty() {
                 failed.push(format!("{ext}: nothing extracted"));
             }
-            if !NO_HELLO.contains(ext) && !files.iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"Hello from Kestrel\n")) {
+            if !NO_HELLO.contains(ext) && !hello {
                 failed.push(format!("{ext}: hello.txt missing or wrong"));
             }
             // what the preview pane lists must be what Extract produces
             let scratch = work.join(format!("list{i}"));
             std::fs::create_dir_all(&scratch).unwrap();
-            match list_archive(&f.canonicalize().unwrap(), &scratch.canonicalize().unwrap()) {
+            let listed = match list_archive(&f.canonicalize().unwrap(), &scratch.canonicalize().unwrap()) {
                 Ok(entries) => {
                     for e in entries.iter().filter(|e| !e.dir) {
                         if !out.join(&e.path).exists() {
                             failed.push(format!("{ext}: listed but not extracted: {}", e.path));
                         }
                     }
+                    let n = entries.iter().filter(|e| !e.dir).count();
+                    if n != files.len() {
+                        failed.push(format!("{ext}: preview lists {n} files, Extract gives {}", files.len()));
+                    }
+                    n
                 }
-                Err(e) => failed.push(format!("{ext}: listing failed: {e}")),
-            }
+                Err(e) => {
+                    failed.push(format!("{ext}: listing failed: {e}"));
+                    0
+                }
+            };
+            report.push(format!(
+                "{:4}  {:9}  {:16}  {:>2} extracted, {:>2} listed  {}",
+                if failed.len() == before { "ok" } else { "FAIL" },
+                ext,
+                f.file_name().unwrap().to_string_lossy(),
+                files.len(),
+                listed,
+                match (hello, NO_HELLO.contains(ext)) {
+                    (true, _) => "hello.txt ok",
+                    (false, true) => "(own contents)",
+                    (false, false) => "hello.txt MISSING",
+                }
+            ));
         }
+        println!("{}\n{} formats, {} failed", report.join("\n"), report.len() + missing.len(), failed.len());
         let _ = std::fs::remove_dir_all(&work);
         if !missing.is_empty() {
             failed.push(format!("no sample for {missing:?}: run scripts/make-archive-fixtures.sh"));

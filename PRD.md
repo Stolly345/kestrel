@@ -406,3 +406,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   README); `fileops::every_format_extracts` extracts each through `unpack()` (the sandboxed core of Extract Here,
   factored out), checks hello.txt where the format holds it, and checks every listed file came out. Fails on an
   extension with no sample. Verified it catches the 0.9.11 split-archive bug when that fix is reverted. 70/70 pass.
+- **v0.9.14 (2026-10-26): preview listing fixes found by the format test.** The per-format report showed the
+  preview pane listing nothing for .xz .bz2 .zst .lzma .z .deb .udeb .rpm (7-Zip gives a lone stream no `Path`; it
+  is now named like Extract names it: innermost layer minus its extension, e.g. data.tar.xz → data.tar) and
+  counting XAR/.pkg folders as files (an entry with entries under it is a folder). every_format_extracts now
+  requires preview count == extracted count and checks hello.txt inside disk images too; prints a per-format
+  report with `-- --nocapture`. 70/70.
