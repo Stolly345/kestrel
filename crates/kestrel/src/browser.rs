@@ -279,6 +279,11 @@ pub struct Browser {
     tag_picker: gtk::Box,
     dir_col: gtk::ColumnViewColumn,
     git_col: gtk::ColumnViewColumn,
+    /// Size/Modified/Type by settings id: order, width and visibility come from Preferences.
+    opt_cols: Vec<(&'static str, gtk::ColumnViewColumn)>,
+    /// set while applying settings, so the column-change handlers don't save them right back
+    applying_cols: Cell<bool>,
+    col_save_pending: Cell<bool>,
     git: RefCell<Option<Rc<crate::git::GitInfo>>>,
     git_pending: Cell<bool>,
     /// (position, view) -> the ListItem showing it, to anchor the rename popup.
@@ -431,6 +436,7 @@ impl Browser {
             Loc::Search(q) => (gio::File::for_path(glib::home_dir()), Some(q)),
         };
         let b = Rc::new_cyclic(|me: &Weak<Browser>| Browser::build(ops, item_model, bg_model, dir, me.clone()));
+        b.apply_columns();
         b.wire();
         b.load_dir();
         if let Some(q) = query {
@@ -566,6 +572,7 @@ impl Browser {
         for c in [&name_col, &git_col, &dir_col, &size_col, &date_col, &type_col] {
             list.append_column(c);
         }
+        let opt_cols = vec![("size", size_col.clone()), ("modified", date_col.clone()), ("type", type_col.clone())];
         list.sort_by_column(Some(&name_col), gtk::SortType::Ascending);
         let dirs_first = gtk::CustomSorter::new(|a, b| cmp(!is_dirlike(info_of(a)), !is_dirlike(info_of(b))));
         let multi = gtk::MultiSorter::new();
@@ -711,6 +718,9 @@ impl Browser {
             tag_picker,
             dir_col,
             git_col,
+            opt_cols,
+            applying_cols: Cell::new(false),
+            col_save_pending: Cell::new(false),
             git: RefCell::default(),
             git_pending: Cell::new(false),
             rows: RefCell::default(),
@@ -737,6 +747,15 @@ impl Browser {
 
     /// Signal handlers that need `self`.
     fn wire(self: &Rc<Self>) {
+        // remember columns resized or moved by dragging in the list
+        for (_, c) in &self.opt_cols {
+            let w = self.me.clone();
+            c.connect_fixed_width_notify(move |_| w.upgrade().into_iter().for_each(|b| b.save_columns_soon()));
+        }
+        let w = self.me.clone();
+        self.list
+            .columns()
+            .connect_items_changed(move |_, _, _, _| w.upgrade().into_iter().for_each(|b| b.save_columns_soon()));
         let me = self.me.clone();
         let (im, bm) = (self.item_menu.clone(), self.bg_menu.clone());
         self.root.connect_destroy(move |_| {
@@ -879,6 +898,40 @@ impl Browser {
         let w = me.clone();
         fc.connect_leave(move |_| w.upgrade().into_iter().for_each(|b| b.loc_stack.set_visible_child_name("crumbs")));
         self.loc_entry.add_controller(fc);
+    }
+
+    /// Column order, widths and visibility from Preferences. Name, Git and Folder stay first.
+    pub fn apply_columns(&self) {
+        self.applying_cols.set(true);
+        for (i, p) in crate::prefs::get().columns().iter().enumerate() {
+            if let Some((_, c)) = self.opt_cols.iter().find(|(id, _)| *id == p.id) {
+                c.set_visible(p.visible);
+                c.set_fixed_width(p.width);
+                self.list.insert_column(3 + i as u32, c); // moves it if already there
+            }
+        }
+        self.applying_cols.set(false);
+    }
+
+    /// A column was dragged wider/narrower or moved in the list: remember it (once things settle).
+    fn save_columns_soon(&self) {
+        if self.applying_cols.get() || self.col_save_pending.replace(true) {
+            return;
+        }
+        let me = self.me.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+            let Some(b) = me.upgrade() else { return };
+            b.col_save_pending.set(false);
+            let cols = b.list.columns();
+            let order: Vec<crate::prefs::ColumnPref> = (0..cols.n_items())
+                .filter_map(|i| cols.item(i).and_downcast::<gtk::ColumnViewColumn>())
+                .filter_map(|c| {
+                    let (id, _) = b.opt_cols.iter().find(|(_, x)| *x == c)?;
+                    Some(crate::prefs::ColumnPref { id: id.to_string(), visible: c.is_visible(), width: c.fixed_width() })
+                })
+                .collect();
+            crate::prefs::update(|s| s.columns = order);
+        });
     }
 
     /// Tags every selected file has (shown checked in the menu's colour dots).

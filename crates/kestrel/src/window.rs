@@ -1237,7 +1237,7 @@ impl Win {
         });
         self.act("palette", |w| crate::palette::show(&w.window));
         self.act("preferences", |w| {
-            let (me, ops) = (w.me.clone(), w.ops.clone());
+            let (me, me2, ops) = (w.me.clone(), w.me.clone(), w.ops.clone());
             crate::prefs::show(
                 &w.window,
                 move || {
@@ -1246,6 +1246,11 @@ impl Win {
                         // re-list so rows pick up display settings (time format)
                         w.panes.iter().flat_map(|p| p.browsers()).for_each(|b| b.reload());
                         w.refresh_preview();
+                    }
+                },
+                move || {
+                    if let Some(w) = me2.upgrade() {
+                        w.panes.iter().flat_map(|p| p.browsers()).for_each(|b| b.apply_columns());
                     }
                 },
                 move |m| ops.toast(m),

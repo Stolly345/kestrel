@@ -333,3 +333,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Preferences → Browsing → File type names: Full ("Microsoft Excel Worksheet", GIO's description) / Short ("Excel":
   drops "Microsoft" and a trailing generic noun) / Extension ("XLSX", "TAR.GZ"); Type column sorts by what it shows.
   Unknown types ("text/x-foo type") show as "RS file" instead.
+- **v0.9.4 (2026-10-26): column options.** Alex couldn't resize Type (the last column's only resize handle is its
+  right edge, against the window border; dragging the gap to its left resizes Modified) or drag headers to reorder.
+  Preferences → Columns: per column (Size, Modified, Type) a width (px), move left/right, show/hide, plus Reset;
+  applied live to every open list. Widths dragged in the list (and any header reorder) are saved too. Name stays
+  first and fills the rest; Folder (search results) and Git (repos) still show automatically.

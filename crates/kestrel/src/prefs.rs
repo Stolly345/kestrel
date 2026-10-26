@@ -7,6 +7,21 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::path::PathBuf;
 
+/// One optional Details-view column: shown or not, its width, and (by its place in the list) its order.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct ColumnPref {
+    pub id: String,
+    pub visible: bool,
+    pub width: i32,
+}
+
+/// (id, title, default width) of the columns after Name, in default order.
+pub const COLUMNS: [(&str, &str, i32); 3] = [("size", "Size", 90), ("modified", "Modified", 170), ("type", "Type", 220)];
+
+fn default_columns() -> Vec<ColumnPref> {
+    COLUMNS.iter().map(|&(id, _, width)| ColumnPref { id: id.into(), visible: true, width }).collect()
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -23,6 +38,8 @@ pub struct Settings {
     pub clock: String,
     /// Type column: "full" (Microsoft Excel Worksheet) | "short" (Excel) | "extension" (XLSX)
     pub type_style: String,
+    /// Details-view columns after Name, in display order.
+    pub columns: Vec<ColumnPref>,
 }
 
 impl Default for Settings {
@@ -36,6 +53,7 @@ impl Default for Settings {
             type_to_search: true,
             clock: "system".into(),
             type_style: "full".into(),
+            columns: default_columns(),
         }
     }
 }
@@ -51,6 +69,21 @@ impl Settings {
             "24h" => false,
             _ => system_12h(),
         }
+    }
+    /// The saved columns, cleaned up: known ids only, each once, missing ones appended.
+    pub fn columns(&self) -> Vec<ColumnPref> {
+        let mut out: Vec<ColumnPref> = Vec::new();
+        for c in &self.columns {
+            if COLUMNS.iter().any(|(id, ..)| *id == c.id) && !out.iter().any(|o| o.id == c.id) {
+                out.push(ColumnPref { width: c.width.clamp(40, 1000), ..c.clone() });
+            }
+        }
+        for d in default_columns() {
+            if !out.iter().any(|o| o.id == d.id) {
+                out.push(d);
+            }
+        }
+        out
     }
     pub fn scope(&self) -> Scope {
         Scope::ALL[(self.default_scope as usize).min(2)]
@@ -160,12 +193,102 @@ fn combo(title: &str, subtitle: &str, items: &[&str], selected: u32) -> adw::Com
         .build()
 }
 
+/// Columns: one row per column with width, move up/down, and show/hide; Reset restores defaults.
+fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
+    use std::rc::Rc;
+    let group = adw::PreferencesGroup::builder()
+        .title("Columns")
+        .description("Details view. Name always comes first and takes the remaining space. Dragging a column edge in the list is remembered too.")
+        .build();
+    let reset = gtk::Button::builder().label("Reset").css_classes(["flat"]).valign(gtk::Align::Center).build();
+    group.set_header_suffix(Some(&reset));
+    let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::default();
+    let rebuild: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::default();
+    let change = {
+        let (apply, rebuild) = (apply.clone(), rebuild.clone());
+        move |f: &dyn Fn(&mut Vec<ColumnPref>), relayout: bool| {
+            update(|s| {
+                let mut c = s.columns();
+                f(&mut c);
+                s.columns = c;
+            });
+            apply();
+            if relayout && let Some(r) = rebuild.borrow().clone() {
+                // after the click handler returns: it's running inside a row that's about to go
+                glib::idle_add_local_once(move || r());
+            }
+        }
+    };
+    let change: Rc<dyn Fn(&dyn Fn(&mut Vec<ColumnPref>), bool)> = Rc::new(change);
+    let (g, rws, ch) = (group.clone(), rows.clone(), change.clone());
+    let build: Rc<dyn Fn()> = Rc::new(move || {
+        for r in rws.borrow_mut().drain(..) {
+            g.remove(&r);
+        }
+        let cols = get().columns();
+        let n = cols.len();
+        for (i, c) in cols.into_iter().enumerate() {
+            let title = COLUMNS.iter().find(|(id, ..)| *id == c.id).map_or("", |(_, t, _)| *t);
+            let row = adw::ActionRow::builder().title(title).build();
+            let width = gtk::SpinButton::with_range(40.0, 1000.0, 10.0);
+            width.set_value(c.width as f64);
+            width.set_valign(gtk::Align::Center);
+            width.set_tooltip_text(Some("Width in pixels"));
+            let (id, ch2) = (c.id.clone(), ch.clone());
+            width.connect_value_changed(move |w| {
+                let v = w.value() as i32;
+                ch2(&|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.width = v), false);
+            });
+            let arrow = |icon: &str, tip: &str, ok: bool, delta: isize| {
+                let b = gtk::Button::builder()
+                    .icon_name(icon)
+                    .tooltip_text(tip)
+                    .css_classes(["flat", "circular"])
+                    .valign(gtk::Align::Center)
+                    .sensitive(ok)
+                    .build();
+                let ch3 = ch.clone();
+                b.connect_clicked(move |_| {
+                    let j = (i as isize + delta) as usize;
+                    ch3(&|cols: &mut Vec<ColumnPref>| cols.swap(i, j), true);
+                });
+                b
+            };
+            let up = arrow("go-up-symbolic", "Move left", i > 0, -1);
+            let down = arrow("go-down-symbolic", "Move right", i + 1 < n, 1);
+            let show = gtk::Switch::builder().active(c.visible).valign(gtk::Align::Center).tooltip_text("Show this column").build();
+            let (id, ch4) = (c.id.clone(), ch.clone());
+            show.connect_active_notify(move |s| {
+                let on = s.is_active();
+                ch4(&|cols: &mut Vec<ColumnPref>| cols.iter_mut().filter(|x| x.id == id).for_each(|x| x.visible = on), false);
+            });
+            for w in [width.upcast_ref::<gtk::Widget>(), up.upcast_ref(), down.upcast_ref(), show.upcast_ref()] {
+                row.add_suffix(w);
+            }
+            crate::label_icon_buttons(row.upcast_ref());
+            g.add(&row);
+            rws.borrow_mut().push(row);
+        }
+    });
+    *rebuild.borrow_mut() = Some(build.clone());
+    build();
+    let ch = change.clone();
+    reset.connect_clicked(move |_| ch(&|cols: &mut Vec<ColumnPref>| *cols = default_columns(), true));
+    group
+}
+
 fn switch(title: &str, subtitle: &str, on: bool) -> adw::SwitchRow {
     adw::SwitchRow::builder().title(title).subtitle(subtitle).active(on).build()
 }
 
 /// `on_change` lets the window react (hidden files, etc.); `toast` reports results.
-pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, toast: impl Fn(&str) + Clone + 'static) {
+/// `on_change`: display settings changed (re-list); `on_columns`: column layout changed (cheap, live).
+pub fn show(
+    parent: &adw::ApplicationWindow,
+    on_change: impl Fn() + 'static,
+    on_columns: impl Fn() + 'static,
+    toast: impl Fn(&str) + Clone + 'static,
+) {
     let s = get();
     let on_change = std::rc::Rc::new(on_change);
     let dialog = adw::PreferencesDialog::builder().search_enabled(false).build();
@@ -234,6 +357,7 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, toa
     });
     browse.add(&types);
     page.add(&browse);
+    page.add(&columns_group(std::rc::Rc::new(on_columns)));
 
     let search = adw::PreferencesGroup::builder().title("Search").build();
     let scope = combo(
@@ -402,4 +526,27 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, toa
     dialog.add(&page);
 
     dialog.present(Some(parent));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_columns_are_cleaned_up() {
+        let c = |id: &str, visible, width| ColumnPref { id: id.into(), visible, width };
+        // old/hand-edited settings: an unknown id, a duplicate, a silly width, Modified missing
+        let s = Settings {
+            columns: vec![c("type", true, 5000), c("bogus", true, 50), c("size", false, 90), c("type", false, 10)],
+            ..Settings::default()
+        };
+        let got: Vec<_> = s.columns().into_iter().map(|c| (c.id, c.visible, c.width)).collect();
+        assert_eq!(
+            got,
+            vec![("type".into(), true, 1000), ("size".into(), false, 90), ("modified".into(), true, 170)]
+        );
+        // settings files from before columns existed get the defaults
+        let old: Settings = serde_json::from_str(r#"{"clock":"12h"}"#).unwrap();
+        assert_eq!(old.columns().len(), 3);
+    }
 }
