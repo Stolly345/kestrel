@@ -338,3 +338,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Preferences → Columns: per column (Size, Modified, Type) a width (px), move left/right, show/hide, plus Reset;
   applied live to every open list. Widths dragged in the list (and any header reorder) are saved too. Name stays
   first and fills the rest; Folder (search results) and Git (repos) still show automatically.
+- **v0.9.5 (2026-10-26): drag headers to reorder columns.** GTK 4.22's own reordering never starts: the column
+  title's click gesture claims the press, which denies the view's drag gesture (`gtkcolumnviewtitle.c`
+  `click_pressed_cb`; a bare Python ColumnView fails the same way). Kestrel turns GTK's off and watches raw
+  capture-phase events: press on a Size/Modified/Type header, release over another one, and it moves there (saved).
+  Name/Git/Folder can't be moved or dropped onto; a resize drag (width changed) never reorders; clicks still sort.
+  New app icon: kestrel head on a yellow folder (Gemini-generated, background cut out, 512 px PNG embedded in the SVG).

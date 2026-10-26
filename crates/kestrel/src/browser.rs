@@ -459,7 +459,7 @@ impl Browser {
         let hl: Rc<RefCell<Vec<String>>> = Rc::default();
         let hl2 = hl.clone();
         // details view
-        let list = gtk::ColumnView::builder().model(&dir_sel).enable_rubberband(true).reorderable(true).build();
+        let list = gtk::ColumnView::builder().model(&dir_sel).enable_rubberband(true).reorderable(false).build();
         list.add_css_class("data-table");
         let name_f = factory(
             &me,
@@ -756,6 +756,7 @@ impl Browser {
         self.list
             .columns()
             .connect_items_changed(move |_, _, _, _| w.upgrade().into_iter().for_each(|b| b.save_columns_soon()));
+        self.column_drag();
         let me = self.me.clone();
         let (im, bm) = (self.item_menu.clone(), self.bg_menu.clone());
         self.root.connect_destroy(move |_| {
@@ -911,6 +912,72 @@ impl Browser {
             }
         }
         self.applying_cols.set(false);
+    }
+
+    /// Drag a Size/Modified/Type header onto another to move it there. GTK 4.22's own reordering
+    /// never starts (the title's click gesture claims the press and denies the view's drag gesture),
+    /// so watch raw events instead; they reach capture-phase controllers whatever gestures claim.
+    fn column_drag(self: &Rc<Self>) {
+        let at = Rc::new(Cell::new((0.0, 0.0)));
+        let m = gtk::EventControllerMotion::new();
+        m.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let a = at.clone();
+        m.connect_motion(move |_, x, y| a.set((x, y)));
+        self.list.add_controller(m);
+
+        // (column pressed, press x, its width then: a changed width means it was a resize)
+        let drag: RefCell<Option<(gtk::ColumnViewColumn, f64, i32)>> = RefCell::default();
+        let l = gtk::EventControllerLegacy::new();
+        l.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let w = self.me.clone();
+        l.connect_event(move |_, ev| {
+            let Some(b) = w.upgrade() else { return glib::Propagation::Proceed };
+            let (x, y) = at.get();
+            match ev.event_type() {
+                gdk::EventType::ButtonPress if ev.downcast_ref::<gdk::ButtonEvent>().is_some_and(|e| e.button() == 1) => {
+                    *drag.borrow_mut() = b.opt_col_at(x, y).map(|c| {
+                        let width = c.fixed_width();
+                        (c, x, width)
+                    });
+                }
+                gdk::EventType::ButtonRelease => {
+                    if let Some((c, x0, width)) = drag.take()
+                        && (x - x0).abs() > 16.0
+                        && c.fixed_width() == width
+                        && let Some(target) = b.opt_col_at(x, b.list.first_child().map_or(0, |h| h.height()) as f64 / 2.0)
+                        && target != c
+                    {
+                        let cols = b.list.columns();
+                        if let Some(i) = (0..cols.n_items()).find(|&i| cols.item(i).as_ref() == Some(target.upcast_ref())) {
+                            b.list.insert_column(i, &c); // the column list change saves it
+                        }
+                    }
+                }
+                _ => {}
+            }
+            glib::Propagation::Proceed
+        });
+        self.list.add_controller(l);
+    }
+
+    /// The Size/Modified/Type column whose header is at (x, y) in the list's coordinates.
+    fn opt_col_at(&self, x: f64, y: f64) -> Option<gtk::ColumnViewColumn> {
+        // the header row is the view's first child, its titles in column order
+        let header = self.list.first_child()?;
+        let cols = self.list.columns();
+        let mut title = header.first_child();
+        let mut i = 0;
+        while let Some(t) = title {
+            if t.is_visible()
+                && t.compute_bounds(&self.list).is_some_and(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
+            {
+                let c = cols.item(i).and_downcast::<gtk::ColumnViewColumn>()?;
+                return self.opt_cols.iter().any(|(_, o)| *o == c).then_some(c);
+            }
+            title = t.next_sibling();
+            i += 1;
+        }
+        None
     }
 
     /// A column was dragged wider/narrower or moved in the list: remember it (once things settle).
