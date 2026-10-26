@@ -1,0 +1,48 @@
+[package]
+name = "chimera"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "File manager with instant whole-disk search (Everything + Files for Linux)"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
+chimera-index = { path = "../chimera-index" }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+git2 = { version = "0.21", default-features = false }
+libc = "0.2"
+
+[package.metadata.deb]
+name = "chimera"
+maintainer = "Stolly345 <114888417+Stolly345@users.noreply.github.com>"
+copyright = "2026, Alex Stoll"
+extended-description = """\
+Chimera pairs Everything's instant whole-disk search (a root daemon indexing \
+every local filesystem, kept live with fanotify, results filtered to what the \
+asking user may see) with a Files-style GTK4 file manager: tabs, dual pane, \
+details/grid/column views, preview pane, git status, color tags and a command \
+palette. Includes the `cx` command-line search client."""
+section = "utils"
+priority = "optional"
+depends = "$auto, 7zip, tar"
+recommends = "gvfs-backends, xdg-terminal-exec"
+conf-files = ["/etc/chimera/excludes"]
+maintainer-scripts = "../../packaging/debian/"
+assets = [
+    ["target/release/chimera", "usr/bin/", "755"],
+    ["target/release/chimera-indexd", "usr/bin/", "755"],
+    ["target/release/cx", "usr/bin/", "755"],
+    ["../../packaging/excludes", "etc/chimera/excludes", "644"],
+    ["../../packaging/dev.chimera.Chimera.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/dev.chimera.Chimera.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../PLAN.md", "usr/share/doc/chimera/PLAN.md", "644"],
+]
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "../../packaging"
+unit-name = "chimera-indexd"
+enable = true
+start = true
+restart-after-upgrade = true

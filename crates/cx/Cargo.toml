@@ -1,0 +1,10 @@
+[package]
+name = "cx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chimera-index = { path = "../chimera-index" }
+serde_json = "1"
+chrono = "0.4"

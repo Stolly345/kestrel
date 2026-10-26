@@ -1,0 +1,10 @@
+[package]
+name = "chimera-indexd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chimera-index = { path = "../chimera-index" }
+libc = "0.2"
+serde_json = "1"

@@ -1,0 +1,7 @@
+# chimera-indexd: one absolute path per line; everything under it is not indexed.
+# Restart the service after editing: sudo systemctl restart chimera-indexd
+# Timeshift snapshots repeat the whole system once per snapshot.
+/timeshift
+# Container image layers: millions of internal files nobody searches for.
+/var/lib/docker
+/var/lib/containers

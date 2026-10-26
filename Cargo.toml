@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["crates/chimera-index", "crates/chimera-indexd", "crates/cx", "crates/chimera"]
+
+[workspace.package]
+version = "0.7.2"
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+strip = true
+lto = "thin"
