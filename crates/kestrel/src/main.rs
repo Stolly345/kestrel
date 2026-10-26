@@ -6,6 +6,7 @@ mod filemanager1;
 mod fileops;
 mod git;
 mod icon;
+mod network;
 mod palette;
 mod prefs;
 mod preview;

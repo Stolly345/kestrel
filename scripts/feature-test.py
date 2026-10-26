@@ -901,6 +901,35 @@ def _():
     eventually(lambda: os.stat(p).st_mode & 0o100, "the execute bit on disk")
 
 
+@test("properties: Calculate totals a folder the index doesn't cover (a network share)")
+def _():
+    # FT_NETDIR=/run/user/…/gvfs/smb-share:…/Folder runs it on a real network folder too
+    target = os.environ.get("FT_NETDIR") or os.path.join(D, "Projects")
+    want_n = sum(len(ds) + len(fs) for _, ds, fs in os.walk(target))
+    if ixd and ixd.poll() is None:  # an earlier test's index would answer instead of counting
+        ixd.kill()
+        ixd.wait()
+    start(os.path.dirname(target))  # no index running: the size has to be counted
+    select(os.path.basename(target)); key("Alt_L", "Return")
+    one(None, "Properties")
+    press_button("Calculate")
+    eventually(lambda: all_(contains=f"for {want_n} items"), f"'… for {want_n} items'", timeout=120)
+
+
+@test("network: the page lists previous servers (shared with GNOME Files) and can forget one")
+def _():
+    gtk4 = os.path.join(HOME, ".config/gtk-4.0")
+    os.makedirs(gtk4, exist_ok=True)
+    servers = os.path.join(gtk4, "servers")
+    open(servers, "w").write('<?xml version="1.0"?>\n<xbel version="1.0">\n  <bookmark href="sftp://tester@192.0.2.7/srv" added="2026-01-01T00:00:00Z" visited="2026-01-01T00:00:00Z">\n  </bookmark>\n</xbel>\n')
+    start(D)
+    click(one("list item", "Network"))
+    one(None, "Previous"); one(None, "Connect to Server")
+    one(None, contains="tester@192.0.2.7/srv")
+    press_button("Forget this server")
+    eventually(lambda: "192.0.2.7" not in open(servers).read(), "the server removed from GTK's servers file")
+
+
 # palette, preferences, terminal, scripts, git, open, FileManager1
 @test("palette: Ctrl+Shift+P runs a command by name")
 def _():
@@ -1021,6 +1050,8 @@ def main():
             stop()
     if ixd and ixd.poll() is None:
         ixd.kill()
+    # GVfs's network browsing starts wsdd in this session; it outlives dbus-run-session otherwise
+    subprocess.run(["pkill", "-f", f"wsdd .*--listen {RUN}/"], capture_output=True)
     print(f"{ran - failed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 

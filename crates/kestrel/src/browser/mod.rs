@@ -1113,6 +1113,10 @@ impl Browser {
     fn load_dir(&self) {
         let f = self.dir.borrow().clone();
         self.set_crumbs();
+        if self.is_network() {
+            self.show_network();
+            return;
+        }
         if self.is_trash() {
             let files = crate::fileops::home_trash().join("files");
             let _ = std::fs::create_dir_all(&files);
@@ -1277,7 +1281,30 @@ impl Browser {
         });
     }
 
+    pub fn is_network(&self) -> bool {
+        self.dir.borrow().uri() == "network:///"
+    }
+
+    /// network:/// gets its own page (connected, previous, found, connect-to-server), built afresh
+    /// each visit so it reflects what's mounted now.
+    fn show_network(&self) {
+        if let Some(old) = self.stack.child_by_name("network") {
+            self.stack.remove(&old);
+        }
+        let me = self.me.clone();
+        let open: std::rc::Rc<dyn Fn(gio::File)> = std::rc::Rc::new(move |f| {
+            if let Some(b) = me.upgrade() {
+                b.go(Loc::Dir(f));
+            }
+        });
+        self.stack.add_named(&crate::network::page(open), Some("network"));
+        self.stack.set_visible_child_name("network");
+    }
+
     fn show_view(&self) {
+        if self.is_network() && !self.is_searching() {
+            return self.stack.set_visible_child_name("network");
+        }
         let m = if self.is_searching() && self.mode.get() == Mode::Columns {
             Mode::List
         } else {

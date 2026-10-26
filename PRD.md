@@ -421,6 +421,16 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   LICENSE-APACHE, shipped in /usr/share/doc/kestrel). README rewritten for GitHub (badges, screenshots slots in
   docs/screenshots/, mermaid architecture, features, syntax, shortcuts, dependencies, limitations, credits). Not
   published yet: Alex reviews first; screenshots still to be taken.
+- **v0.9.21 (2026-10-26): folder sizes on network shares.** A share's sidebar bar is its disk's totals
+  (both NAS shares report the same 3.9 TB volume; that's what a share can report, and it answers "will
+  this fit", so it stays). For a folder's own size, Properties now shows Calculate on folders the index
+  doesn't cover (network shares, tmpfs, excluded): `props::walk_size` totals it in the background with a
+  running count, and Cancel stops it. Checked on the My Cloud share against an independent count.
+  Network page (network.rs), like GNOME Files': Connected (mounted shares, with Disconnect), Previous
+  (GTK's ~/.config/gtk-4.0/servers, shared with Files, with Forget; plus online-account drives), Available
+  on Current Network (network:///, DNS-SD / WS-Discovery) and Connect to Server. network:/// alone listed only
+  the last group. The servers file is read/written by hand: glib-rs 0.22 BookmarkFile panicked on a NULL
+  from C and crashed the app. feature-test kills the wsdd that GVfs network browsing leaves behind.
 - **v0.9.20 (2026-10-26): music player.** Pressing Play on some MP3s (Alex's "01 Peaceful Slumber.mp3")
   killed the app: GtkMediaFile always gives GStreamer 1.28's playbin3 a video sink, and decodebin3 then
   aborts the process (`mq_slot_handle_stream_start: assertion failed: (collection)`; reproduced with

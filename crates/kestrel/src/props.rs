@@ -4,6 +4,82 @@ use crate::browser::{ATTRS, info_file};
 use crate::preview::perms;
 use adw::prelude::*;
 use gtk::{gio, glib};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// A "Calculate" button on the Size row: totals the folder in the background (a running count while
+/// it works, Cancel to stop), for folders the index doesn't cover, such as network shares.
+fn add_calculate(row: &adw::ActionRow, folder: gio::File) {
+    let b = gtk::Button::builder().label("Calculate").valign(gtk::Align::Center).build();
+    row.add_suffix(&b);
+    let running: std::rc::Rc<std::cell::RefCell<Option<gio::Cancellable>>> = Default::default();
+    let row = row.downgrade();
+    b.connect_clicked(move |b| {
+        if let Some(c) = running.take() {
+            c.cancel();
+            return;
+        }
+        let Some(row) = row.upgrade() else { return };
+        let c = gio::Cancellable::new();
+        *running.borrow_mut() = Some(c.clone());
+        b.set_label("Cancel");
+        let counts = std::sync::Arc::new((AtomicU64::new(0), AtomicU64::new(0)));
+        let (f, n, c2) = (folder.clone(), counts.clone(), c.clone());
+        let work = gio::spawn_blocking(move || walk_size(&f, &n.0, &n.1, &c2));
+        let (r2, n2) = (row.downgrade(), counts.clone());
+        let tick = glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+            let Some(r) = r2.upgrade() else { return glib::ControlFlow::Break };
+            r.set_subtitle(&format!(
+                "Counting… {} items, {}",
+                n2.0.load(Ordering::Relaxed),
+                glib::format_size(n2.1.load(Ordering::Relaxed))
+            ));
+            glib::ControlFlow::Continue
+        });
+        let (b, running) = (b.clone(), running.clone());
+        glib::spawn_future_local(async move {
+            let done = work.await.unwrap_or(false);
+            tick.remove();
+            running.take();
+            let (n, bytes) = (counts.0.load(Ordering::Relaxed), counts.1.load(Ordering::Relaxed));
+            if done {
+                row.set_subtitle(&format!("{} for {n} items", glib::format_size(bytes)));
+                b.set_visible(false);
+            } else {
+                row.set_subtitle(&format!("Stopped at {n} items, {}", glib::format_size(bytes)));
+                b.set_label("Calculate");
+            }
+        });
+    });
+}
+
+/// Adds up everything under `root` (apparent sizes, links not followed), counting as it goes.
+/// Unreadable folders are skipped. Returns false if cancelled. Blocking.
+pub(crate) fn walk_size(root: &gio::File, items: &AtomicU64, bytes: &AtomicU64, c: &gio::Cancellable) -> bool {
+    let mut todo = vec![root.clone()];
+    while let Some(dir) = todo.pop() {
+        let Ok(e) = dir.enumerate_children(
+            "standard::name,standard::type,standard::size",
+            gio::FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            Some(c),
+        ) else {
+            if c.is_cancelled() {
+                return false;
+            }
+            continue;
+        };
+        while let Ok(Some(i)) = e.next_file(Some(c)) {
+            items.fetch_add(1, Ordering::Relaxed);
+            bytes.fetch_add(i.size().max(0) as u64, Ordering::Relaxed);
+            if i.file_type() == gio::FileType::Directory {
+                todo.push(dir.child(i.name()));
+            }
+        }
+        if c.is_cancelled() {
+            return false;
+        }
+    }
+    true
+}
 
 fn action_row(group: &adw::PreferencesGroup, title: &str, value: &str) -> adw::ActionRow {
     let r = adw::ActionRow::builder()
@@ -181,14 +257,24 @@ fn build(parent: &gtk::Widget, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) +
             let size_row = action_row(&g, "Size", &glib::format_size(info.size() as u64));
             if info.file_type() == gio::FileType::Directory {
                 size_row.set_subtitle("Counting…");
-                if let Some(p) = f.path() {
-                    glib::spawn_future_local(async move {
-                        let r = gio::spawn_blocking(move || crate::search::folder_stats(&p))
+                let (row, folder) = (size_row.clone(), f.clone());
+                glib::spawn_future_local(async move {
+                    // instant from the index; network shares and other unindexed folders get a
+                    // Calculate button instead, since adding them up means reading every file's entry
+                    let r = match folder.path() {
+                        Some(p) => gio::spawn_blocking(move || crate::search::folder_stats(&p))
                             .await
-                            .unwrap_or(Err("Counting failed"));
-                        size_row.set_subtitle(&r.map_or_else(String::from, |(n, b)| format!("{} for {n} items", glib::format_size(b))));
-                    });
-                }
+                            .unwrap_or(Err("Counting failed")),
+                        None => Err("Not in the search index"),
+                    };
+                    match r {
+                        Ok((n, b)) => row.set_subtitle(&format!("{} for {n} items", glib::format_size(b))),
+                        Err(why) => {
+                            row.set_subtitle(why);
+                            add_calculate(&row, folder);
+                        }
+                    }
+                });
             }
             if let Some(t) = crate::browser::link_target(&info) {
                 action_row(&g, "Link Target", &t.display().to_string());
@@ -269,6 +355,29 @@ fn build(parent: &gtk::Widget, infos: Vec<gio::FileInfo>, toast: impl Fn(&str) +
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn walks_folder_sizes() {
+        let d = std::env::temp_dir().join(format!("kestrel-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("a/b")).unwrap();
+        std::fs::write(d.join("one"), [0u8; 100]).unwrap();
+        std::fs::write(d.join("a/two"), [0u8; 20]).unwrap();
+        std::fs::write(d.join("a/b/three"), [0u8; 3]).unwrap();
+        std::os::unix::fs::symlink(&d, d.join("a/loop")).unwrap(); // not followed
+        let (n, b) = (AtomicU64::new(0), AtomicU64::new(0));
+        let root = gio::File::for_path(&d);
+        assert!(walk_size(&root, &n, &b, &gio::Cancellable::new()));
+        // one, a, a/two, a/b, a/b/three, a/loop
+        assert_eq!(n.load(Ordering::Relaxed), 6);
+        assert!(b.load(Ordering::Relaxed) >= 123);
+        let c = gio::Cancellable::new();
+        c.cancel();
+        assert!(!walk_size(&root, &AtomicU64::new(0), &AtomicU64::new(0), &c));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn hashes_of_abc() {
         let p = std::env::temp_dir().join(format!("kestrel-hash-{}", std::process::id()));

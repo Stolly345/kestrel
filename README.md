@@ -54,12 +54,13 @@ the results only ever include files you could find yourself.
 **File manager**
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
+- A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
 - Copy, move, rename, undo; clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
 - Colour tags, git status column and branch, symlink badges, free-space bars on drives
 - Command palette (Ctrl+Shift+P), terminal panel that follows the folder (Ctrl+\`)
-- Properties with checksums (MD5, SHA-1, SHA-256) and paste-to-verify
+- Properties with checksums (MD5, SHA-1, SHA-256) and paste-to-verify; folder sizes instantly from the index, or on request (Calculate) for network shares
 - Right-click scripts from `~/.local/share/nautilus/scripts`, run exactly as GNOME Files runs them
 - Can be your default file manager, including "Show in Folder" from other apps
 
