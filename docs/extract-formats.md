@@ -13,8 +13,8 @@ The list lives in code as `ARCHIVE_EXTS` in `crates/kestrel/src/fileops.rs`; kee
 |---|---|---|
 | .7z | 7-Zip | password-protected archives supported |
 | .zip, .zipx | ZIP | password-protected archives supported (ZipCrypto and AES) |
-| .z01, .001 | split ZIP / split archive (first part) | the other parts must sit next to it |
-| .rar | RAR 4 and RAR 5 | encrypted archives supported; open the first volume (.part1.rar or .rar) |
+| .z01, .001 | split ZIP (.z01, .z02 … .zip) / split archive (.7z.001, .zip.001 …) | the other parts must sit next to it; the .zip of a split ZIP works too |
+| .rar, .r00 | RAR 4 and RAR 5, including multi-volume (.part1.rar …, or .rar + .r00, .r01 …) | encrypted archives supported; any part extracts the whole set |
 | .cab | Microsoft Cabinet | |
 | .arj | ARJ | |
 | .lzh, .lha | LHA / LZH | |
@@ -57,10 +57,20 @@ These hold one file; extracting gives you that file back.
 | .msi, .msp | Windows Installer | gives the installer's internal streams and cabinets |
 | .apk | Android app | |
 | .jar | Java archive | |
+| .war | Java web application | |
+| .whl | Python wheel | |
 | .xpi | Firefox add-on | |
+| .crx | Chrome extension | |
 | .ipa | iOS app | |
 | .appx | Windows app package | |
 | .pkg | macOS installer package (XAR) | |
+
+## Books and comics
+
+| Extension | Format |
+|---|---|
+| .epub | e-book |
+| .cbz | comic book (ZIP of images) |
 
 ## Disk and file-system images
 
@@ -84,13 +94,14 @@ These hold one file; extracting gives you that file back.
 7-Zip can also open these, but Kestrel doesn't show Extract on them, because they're documents or
 programs you normally just open:
 
-- Office and OpenDocument files (.docx, .xlsx, .pptx, .odt, .ods, .epub) are ZIPs inside.
+- Office and OpenDocument files (.docx, .xlsx, .pptx, .odt, .ods) are ZIPs inside; the preview pane
+  shows their pages instead.
 - Old Office files (.doc, .xls, .ppt) are compound files.
 - Windows programs and installers (.exe, .dll, .sys), including self-extracting and NSIS installers.
 - Linux and macOS programs (ELF, Mach-O), UEFI firmware, and object files.
 - Flash (.swf, .flv), Base64 and Intel HEX files, and checksum files (.sha256, .md5).
 
-To look inside a ZIP-based one (.docx, .epub and so on), rename a copy to .zip and extract that.
+To look inside a ZIP-based one (.docx and so on), rename a copy to .zip and extract that.
 
 ## Not supported
 

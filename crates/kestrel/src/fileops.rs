@@ -448,6 +448,7 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".chm",
     ".z01",
     ".001",
+    ".r00",
     // single-file compression
     ".gz",
     ".gzip",
@@ -457,6 +458,9 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".zst",
     ".lzma",
     ".z",
+    // books and comics (zip inside)
+    ".epub",
+    ".cbz",
     // packages and installers
     ".deb",
     ".udeb",
@@ -465,7 +469,10 @@ pub const ARCHIVE_EXTS: &[&str] = &[
     ".msp",
     ".apk",
     ".jar",
+    ".war",
+    ".whl",
     ".xpi",
+    ".crx",
     ".ipa",
     ".appx",
     ".pkg",
@@ -538,10 +545,65 @@ pub(crate) fn sandboxed(prog: &str, archive: &Path, out: &Path) -> std::process:
     if p.is_absolute() {
         c.arg("--ro-bind").arg(p).arg(p);
     }
-    c.arg("--ro-bind").arg(archive).arg(archive);
+    // every volume of a split archive, or 7-Zip sees only the first part
+    for v in volumes(archive) {
+        c.arg("--ro-bind").arg(&v).arg(&v);
+    }
     c.arg("--bind").arg(out).arg(out);
     c.args(["--unshare-all", "--die-with-parent", "--new-session", "--", prog]);
     c
+}
+
+/// A split archive's name without its volume suffix ("v.7z" for v.7z.003, "x" for x.part2.rar,
+/// x.r00, x.z01, x.zip), or None if `name` doesn't look like a volume.
+fn volume_stem(name: &str) -> Option<&str> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    let numbered = |p: &str| ext.strip_prefix(p).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    if ext == "rar" {
+        // x.part2.rar → x
+        return Some(match stem.rsplit_once('.') {
+            Some((s, part)) if part.len() > 4 && part[..4].eq_ignore_ascii_case("part") && part[4..].bytes().all(|b| b.is_ascii_digit()) => s,
+            _ => stem,
+        });
+    }
+    (numbered("") || numbered("z") || numbered("r") || ext == "zip" || ext == "zipx").then_some(stem)
+}
+
+/// `archive` plus the other volumes next to it (same stem, any volume suffix). Just `archive`
+/// for an ordinary file.
+pub fn volumes(archive: &Path) -> Vec<PathBuf> {
+    let mut all = vec![archive.to_path_buf()];
+    let (Some(name), Some(dir)) = (archive.file_name().and_then(|n| n.to_str()), archive.parent()) else {
+        return all;
+    };
+    let Some(stem) = volume_stem(name) else { return all };
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let n = e.file_name();
+            let Some(n) = n.to_str() else { continue };
+            if n != name && n.len() > stem.len() && n.starts_with(stem) && n.as_bytes()[stem.len()] == b'.' && volume_stem(n) == Some(stem) {
+                all.push(dir.join(n));
+            }
+        }
+    }
+    all
+}
+
+/// The volume 7-Zip must be pointed at: old-style RAR sets (x.rar, x.r00, x.r01…) start at x.rar.
+pub fn first_volume(archive: &Path) -> PathBuf {
+    let name = archive.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if let Some((stem, ext)) = name.rsplit_once('.')
+        && ext.len() > 1
+        && ext.as_bytes()[0].eq_ignore_ascii_case(&b'r')
+        && ext[1..].bytes().all(|b| b.is_ascii_digit())
+    {
+        let first = archive.with_file_name(format!("{stem}.rar"));
+        if first.exists() {
+            return first;
+        }
+    }
+    archive.to_path_buf()
 }
 
 /// One entry of an archive listing.
@@ -554,6 +616,7 @@ pub struct Entry {
 /// What's inside `archive` (canonical path), listed in the sandbox; `scratch` is the empty
 /// writable dir the sandbox needs. Tarballs go through tar (7-Zip would show the one .tar inside).
 pub fn list_archive(archive: &Path, scratch: &Path) -> Result<Vec<Entry>, String> {
+    let archive = &first_volume(archive);
     let name = archive.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
     let tar = is_tarball(&name);
     let mut c = if tar {
@@ -1060,7 +1123,10 @@ impl Ops {
     }
 
     fn extract_pw(self: &Rc<Self>, file: gio::File, pw: Option<String>, into: Option<gio::File>) {
-        let (Some(path), Some(dir)) = (file.path().and_then(|p| p.canonicalize().ok()), into.clone().or_else(|| file.parent())) else {
+        let (Some(path), Some(dir)) = (
+            file.path().and_then(|p| p.canonicalize().ok()).map(|p| first_volume(&p)),
+            into.clone().or_else(|| file.parent()),
+        ) else {
             self.toast("Extracting needs a local file");
             return;
         };
@@ -1425,6 +1491,46 @@ mod tests {
     }
 
     #[test]
+    fn volume_sets() {
+        let d = std::env::temp_dir().join(format!("kestrel-vol-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for n in [
+            "a.7z.001",
+            "a.7z.002",
+            "a.7z",
+            "b.part1.rar",
+            "b.part2.rar",
+            "b.txt",
+            "c.rar",
+            "c.r00",
+            "c.r01",
+            "s.zip",
+            "s.z01",
+            "s.zip.txt",
+            "solo.zip",
+        ] {
+            std::fs::write(d.join(n), "").unwrap();
+        }
+        let set = |n: &str| {
+            let mut v: Vec<String> = volumes(&d.join(n))
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(set("a.7z.002"), ["a.7z.001", "a.7z.002"]);
+        assert_eq!(set("b.part1.rar"), ["b.part1.rar", "b.part2.rar"]);
+        assert_eq!(set("c.r00"), ["c.r00", "c.r01", "c.rar"]);
+        assert_eq!(set("s.zip"), ["s.z01", "s.zip"]);
+        assert_eq!(set("solo.zip"), ["solo.zip"]);
+        assert_eq!(set("b.txt"), ["b.txt"]);
+        assert_eq!(first_volume(&d.join("c.r01")), d.join("c.rar"));
+        assert_eq!(first_volume(&d.join("a.7z.002")), d.join("a.7z.002"));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
     fn sandboxed_7z() {
         let Ok(z) = std::env::var("KESTREL_7ZZ") else { return };
         let d = std::env::temp_dir().join(format!("kestrel-7z-{}", std::process::id()));
@@ -1451,7 +1557,14 @@ mod tests {
         std::fs::create_dir(d.join("sub")).unwrap();
         std::fs::write(d.join("sub/b.txt"), "yo!").unwrap();
         mk(&["a", "tree.zip", "sub"]);
-        assert!(std::process::Command::new("tar").current_dir(&d).args(["-czf", "tree.tar.gz", "sub"]).status().unwrap().success());
+        assert!(
+            std::process::Command::new("tar")
+                .current_dir(&d)
+                .args(["-czf", "tree.tar.gz", "sub"])
+                .status()
+                .unwrap()
+                .success()
+        );
         for arc in ["tree.zip", "tree.tar.gz"] {
             let l = list_archive(&d.join(arc), &out).unwrap();
             assert_eq!(l.len(), 2, "{arc}");
@@ -1459,6 +1572,33 @@ mod tests {
             assert!(l.iter().any(|e| e.path == "sub/b.txt" && !e.dir && e.size == 3), "{arc}");
         }
         assert_eq!(list_archive(&d.join("enc.7z"), &out).err().as_deref(), Some("Encrypted archive"));
+        // split archives: the sandbox must see every part (incompressible data, so it really splits)
+        let mut big = vec![0u8; 3 << 20];
+        let mut x: u64 = 1;
+        for b in big.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *b = x as u8;
+        }
+        std::fs::write(d.join("sub/big.bin"), &big).unwrap();
+        mk(&["a", "-v1m", "vol.7z", "sub"]);
+        assert!(d.join("vol.7z.004").exists());
+        let mut zips = vec!["vol.7z.001"];
+        if std::process::Command::new("zip")
+            .current_dir(&d)
+            .args(["-q", "-r", "-s", "1m", "sz.zip", "sub"])
+            .status()
+            .is_ok_and(|s| s.success())
+        {
+            zips.extend(["sz.zip", "sz.z01"]);
+        }
+        for arc in zips {
+            let o = d.join(format!("out-{arc}"));
+            std::fs::create_dir(&o).unwrap();
+            assert!(run_7z(&d.join(arc), &o, None, &p).is_ok(), "{arc}");
+            assert_eq!(std::fs::read(o.join("sub/big.bin")).unwrap(), big, "{arc}");
+        }
         // the sandbox itself: writes outside `out` are refused, home is hidden
         let mut c = sandboxed("/bin/sh", &d.join("plain.zip"), &out);
         c.args(["-c", &format!("echo x > {}/escaped; ls $HOME", d.display())]);

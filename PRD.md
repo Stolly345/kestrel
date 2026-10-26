@@ -377,3 +377,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   ~/.cache/kestrel/preview is pruned at launch: entries not viewed for 30 days go, then least recently viewed until
   under 512 MB (each open touches its folder's mtime). Unit-tested (cancel, both listings, prune); not click-tested —
   Broadway can't run inside the Claude sandbox this session.
+- **v0.9.11 (2026-10-26): split archives work; more ZIP-based formats.** The sandbox only exposed the clicked file,
+  so split 7z failed ("Unexpected end of archive") and split ZIP wrote files with missing data; `sandboxed()` now
+  read-only binds every volume with the same stem (`fileops::volumes`: .001…, .z01…/.zip, .partN.rar, .rar/.rNN).
+  Old-style RAR parts (.r00…) extract from the .rar (`first_volume`). Extract now offered on .war .whl .crx .epub
+  .cbz .r00. Office/OpenDocument stay preview-only (no Extract item).
