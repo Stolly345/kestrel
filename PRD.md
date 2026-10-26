@@ -314,3 +314,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   reported "no /root for you" as FAIL only because the user-side queries ran as root.
 - **v0.9.1 installed (2026-10-25):** smoke-live 15/15 as Alex (after the script learned to clear a root-owned stale
   log/socket left by a sudo run, which had made it test against a daemon that never started).
+- **v0.9.2 (2026-10-25): document preview pages one at a time.** Multi-page documents were stacked into the pane and
+  squeezed unreadable. Now: one page, "‹ 3 / 12 ›" above it (above, so the arrows don't move as page heights change),
+  mouse wheel/touchpad over the page flips pages (past either end the pane scrolls as usual). No 20-page cap: pdfinfo
+  gives the count and each page renders on first view (sandboxed pdftoppm, cached; Office converts to PDF once).

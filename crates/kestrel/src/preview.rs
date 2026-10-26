@@ -46,8 +46,6 @@ pub fn perms(mode: u32) -> String {
 }
 
 const TEXT_LIMIT: usize = 256 * 1024;
-/// Pages rendered for a PDF or Office document; the rest is one double-click away.
-const PAGES: u32 = 20;
 
 /// Word, Excel, PowerPoint, OpenDocument and RTF: LibreOffice turns them into a PDF first.
 fn is_office(ct: &str) -> bool {
@@ -65,19 +63,26 @@ fn is_office(ct: &str) -> bool {
     .any(|t| ct.starts_with(t))
 }
 
-/// PNGs of a document's first pages, cached under ~/.cache/kestrel/preview by path, size and
-/// mtime. LibreOffice and Poppler parse hostile files, so both run in the archive sandbox
-/// (no network, no home, only the cache folder writable).
+/// A document to page through: its PDF (LibreOffice's conversion, for Office files) and page
+/// count. Pages render one at a time as they're viewed, into `dir`
+/// (~/.cache/kestrel/preview/<hash of path, size, mtime>). LibreOffice and Poppler parse hostile
+/// files, so both run in the archive sandbox (no network, no home, only `dir` writable).
 // ponytail: cache is never pruned; add an LRU sweep if ~/.cache/kestrel/preview grows large
-fn render_pages(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Option<Vec<std::path::PathBuf>> {
+struct Doc {
+    pdf: std::path::PathBuf,
+    dir: std::path::PathBuf,
+    pages: u32,
+}
+
+fn open_doc(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Option<Doc> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (path, stamp).hash(&mut h);
     let dir = glib::user_cache_dir().join("kestrel/preview").join(format!("{:016x}", h.finish()));
-    if !dir.join("done").exists() {
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).ok()?;
-        let pdf = if office {
+    std::fs::create_dir_all(&dir).ok()?;
+    let pdf = if office {
+        let pdf = dir.join("doc.pdf");
+        if !pdf.exists() {
             let mut c = crate::fileops::sandboxed("soffice", path, &dir);
             c.arg(format!("-env:UserInstallation=file://{}/profile", dir.display()))
                 .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
@@ -85,33 +90,100 @@ fn render_pages(path: &std::path::Path, office: bool, stamp: (i64, i64)) -> Opti
                 .arg(path);
             let _ = c.output();
             let _ = std::fs::remove_dir_all(dir.join("profile"));
-            dir.join(format!("{}.pdf", path.file_stem()?.to_string_lossy()))
-        } else {
-            path.to_path_buf()
-        };
-        let mut c = crate::fileops::sandboxed("pdftoppm", &pdf, &dir);
-        c.args(["-scale-to-x", "640", "-scale-to-y", "-1", "-png", "-f", "1", "-l", &PAGES.to_string()])
-            .arg(&pdf)
-            .arg(dir.join("page"));
-        let ok = c.output().is_ok_and(|o| o.status.success());
-        if office {
-            let _ = std::fs::remove_file(&pdf);
+            std::fs::rename(dir.join(format!("{}.pdf", path.file_stem()?.to_string_lossy())), &pdf).ok()?;
         }
-        if !ok {
-            let _ = std::fs::remove_dir_all(&dir);
+        pdf
+    } else {
+        path.to_path_buf()
+    };
+    let count = dir.join("pages");
+    let pages = match std::fs::read_to_string(&count).ok().and_then(|s| s.trim().parse().ok()) {
+        Some(n) => n,
+        None => {
+            let out = crate::fileops::sandboxed("pdfinfo", &pdf, &dir).arg(&pdf).output().ok()?;
+            let n: u32 = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .find_map(|l| l.strip_prefix("Pages:"))?
+                .trim()
+                .parse()
+                .ok()?;
+            let _ = std::fs::write(&count, n.to_string());
+            n
+        }
+    };
+    Some(Doc { pdf, dir, pages }).filter(|d| d.pages > 0)
+}
+
+/// Page `n` (1-based) as a PNG, rendered on first view.
+fn render_page(doc: &Doc, n: u32) -> Option<std::path::PathBuf> {
+    let png = doc.dir.join(format!("p{n}.png"));
+    if !png.exists() {
+        // render under a temporary name: a half-written PNG must never be shown
+        let tmp = doc.dir.join(format!("tmp{n}-{:?}", std::thread::current().id()).replace(['(', ')'], ""));
+        let mut c = crate::fileops::sandboxed("pdftoppm", &doc.pdf, &doc.dir);
+        c.args(["-singlefile", "-scale-to-x", "1000", "-scale-to-y", "-1", "-png", "-f", &n.to_string(), "-l", &n.to_string()])
+            .arg(&doc.pdf)
+            .arg(&tmp);
+        let ok = c.output().is_ok_and(|o| o.status.success());
+        let made = tmp.with_extension("png");
+        if !ok || std::fs::rename(&made, &png).is_err() {
+            let _ = std::fs::remove_file(&made);
             return None;
         }
-        std::fs::write(dir.join("done"), "").ok()?;
     }
-    // pdftoppm zero-pads page numbers to the same width, so name order is page order
-    let mut pages: Vec<_> = std::fs::read_dir(&dir)
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "png"))
-        .collect();
-    pages.sort();
-    Some(pages).filter(|p| !p.is_empty())
+    Some(png)
+}
+
+/// One page at a time: arrows, "3 / 12", and the scroll wheel over the page flips pages.
+/// Holds its widgets weakly so the handlers that own it don't keep them alive.
+struct Pager {
+    doc: std::sync::Arc<Doc>,
+    cur: std::cell::Cell<u32>,
+    pic: glib::WeakRef<gtk::Picture>,
+    label: glib::WeakRef<gtk::Label>,
+    prev: glib::WeakRef<gtk::Button>,
+    next: glib::WeakRef<gtk::Button>,
+    /// placeholder (icon + "Rendering preview…"), hidden once the first page is in
+    waiting: glib::WeakRef<gtk::Box>,
+    note: glib::WeakRef<gtk::Label>,
+    serial: u64,
+    me_serial: std::rc::Rc<std::cell::Cell<u64>>,
+}
+
+impl Pager {
+    /// Show page `n`; false if it's out of range (so a scroll there can scroll the pane instead).
+    fn go(self: &std::rc::Rc<Self>, n: u32) -> bool {
+        if n < 1 || n > self.doc.pages || n == self.cur.get() {
+            return false;
+        }
+        self.cur.set(n);
+        if let (Some(l), Some(p), Some(x)) = (self.label.upgrade(), self.prev.upgrade(), self.next.upgrade()) {
+            l.set_label(&format!("{n} / {}", self.doc.pages));
+            p.set_sensitive(n > 1);
+            x.set_sensitive(n < self.doc.pages);
+        }
+        let (me, doc) = (self.clone(), self.doc.clone());
+        glib::spawn_future_local(async move {
+            let png = gio::spawn_blocking(move || render_page(&doc, n)).await.ok().flatten();
+            if me.cur.get() != n || me.me_serial.get() != me.serial {
+                return; // flipped on, or another file selected, while this page rendered
+            }
+            match (png, me.pic.upgrade()) {
+                (Some(png), Some(pic)) => {
+                    pic.set_filename(Some(&png));
+                    if let Some(w) = me.waiting.upgrade() {
+                        w.set_visible(false);
+                    }
+                }
+                _ => {
+                    if let Some(note) = me.note.upgrade() {
+                        note.set_label("Couldn't render this page");
+                    }
+                }
+            }
+        });
+        true
+    }
 }
 
 /// Markdown as Pango markup: headings, emphasis, code, links, lists, quotes, tables as rows.
@@ -267,39 +339,75 @@ impl Preview {
         } else if (ct == "application/pdf" || is_office(&ct))
             && let Some(path) = file.path()
         {
-            // the thumbnail (or icon) stands in while the pages render
+            // the icon stands in while the document opens and the first page renders
+            let waiting = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
             let img = gtk::Image::builder().pixel_size(128).build();
             set_icon(&img, info);
             img.set_pixel_size(128);
-            let note = gtk::Label::builder().label("Rendering preview…").css_classes(["dim-label"]).build();
-            visual.append(&img);
-            visual.append(&note);
-            let pages = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-            visual.append(&pages);
+            let note = gtk::Label::builder().label("Rendering preview…").wrap(true).css_classes(["dim-label"]).build();
+            waiting.append(&img);
+            waiting.append(&note);
+            let pic = gtk::Picture::builder().can_shrink(true).content_fit(gtk::ContentFit::Contain).css_classes(["card"]).build();
+            let btn = |icon: &str, tip: &str| {
+                gtk::Button::builder().icon_name(icon).tooltip_text(tip).css_classes(["flat", "circular"]).sensitive(false).build()
+            };
+            let (prev, next) = (btn("go-previous-symbolic", "Previous page"), btn("go-next-symbolic", "Next page"));
+            let label = gtk::Label::builder().css_classes(["dim-label", "numeric"]).build();
+            let nav = gtk::CenterBox::builder().start_widget(&prev).center_widget(&label).end_widget(&next).visible(false).build();
+            // arrows above the page: pages differ in height, and the buttons must not move under
+            // the pointer while clicking through
+            visual.append(&nav);
+            visual.append(&waiting);
+            visual.append(&pic);
             let office = is_office(&ct);
             let stamp = (info.size(), info.modification_date_time().map_or(0, |d| d.to_unix()));
             let (serial, me_serial) = (self.serial.get(), self.serial.clone());
             glib::spawn_future_local(async move {
-                let r = gio::spawn_blocking(move || render_pages(&path, office, stamp)).await.ok().flatten();
+                let doc = gio::spawn_blocking(move || open_doc(&path, office, stamp)).await.ok().flatten();
                 if me_serial.get() != serial {
                     return;
                 }
-                match r {
-                    Some(files) => {
-                        img.set_visible(false);
-                        note.set_visible(false);
-                        for f in files {
-                            let pic = gtk::Picture::for_filename(&f);
-                            pic.set_can_shrink(true);
-                            pic.set_content_fit(gtk::ContentFit::Contain);
-                            pic.add_css_class("card");
-                            pages.append(&pic);
-                        }
-                    }
-                    None if office => note.set_label("Office previews need LibreOffice (libreoffice-writer, -calc, -impress)"),
-                    None => note.set_label("No preview available"),
-                }
-                note.set_wrap(true);
+                let Some(doc) = doc else {
+                    note.set_label(if office {
+                        "Office previews need LibreOffice (libreoffice-writer, -calc, -impress)"
+                    } else {
+                        "No preview available"
+                    });
+                    return;
+                };
+                nav.set_visible(doc.pages > 1);
+                let pager = std::rc::Rc::new(Pager {
+                    doc: std::sync::Arc::new(doc),
+                    cur: Default::default(),
+                    pic: pic.downgrade(),
+                    label: label.downgrade(),
+                    prev: prev.downgrade(),
+                    next: next.downgrade(),
+                    waiting: waiting.downgrade(),
+                    note: note.downgrade(),
+                    serial,
+                    me_serial,
+                });
+                let p = pager.clone();
+                prev.connect_clicked(move |_| {
+                    p.go(p.cur.get() - 1);
+                });
+                let p = pager.clone();
+                next.connect_clicked(move |_| {
+                    p.go(p.cur.get() + 1);
+                });
+                // wheel/touchpad over the page flips pages; past either end the pane scrolls
+                let scroll = gtk::EventControllerScroll::new(
+                    gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE,
+                );
+                let p = pager.clone();
+                scroll.connect_scroll(move |_, _, dy| {
+                    let n = p.cur.get();
+                    let to = if dy > 0.0 { n + 1 } else { n.saturating_sub(1) };
+                    if p.go(to) { glib::Propagation::Stop } else { glib::Propagation::Proceed }
+                });
+                pic.add_controller(scroll);
+                pager.go(1);
             });
         } else if thumbs::can_thumbnail(info) {
             let pic = gtk::Picture::builder()
