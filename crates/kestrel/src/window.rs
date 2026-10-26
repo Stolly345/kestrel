@@ -397,10 +397,8 @@ impl Win {
         main.add_top_bar(&header);
         main.add_top_bar(&banner);
         main.add_top_bar(&bar.chips);
-        // file-operation progress: a thin bar under the header, never squeezing the header itself
-        ops.bar.set_valign(gtk::Align::Start);
-        ops.bar.set_hexpand(true);
-        main.add_top_bar(&ops.bar);
+        // file-operation progress: what's running, how far, time left, Cancel
+        main.add_bottom_bar(&ops.bar);
         main.set_content(Some(&content));
 
         let side = adw::ToolbarView::new();

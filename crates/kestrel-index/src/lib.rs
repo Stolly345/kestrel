@@ -377,6 +377,12 @@ impl Index {
         if desc {
             hits.reverse();
         }
+        if !q.boost.is_empty() {
+            // typed a type (`.deb`, `excel`): those first, each part keeping the chosen order
+            let (mut first, rest): (Vec<u32>, Vec<u32>) = hits.into_iter().partition(|&i| self.ext(i).is_some_and(|e| q.boost.iter().any(|b| b == e)));
+            first.extend(rest);
+            hits = first;
+        }
         if let Some(d) = q.dupe {
             hits = self.dupes(hits, d);
         }

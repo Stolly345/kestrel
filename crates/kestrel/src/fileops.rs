@@ -405,7 +405,10 @@ pub struct Ops {
     pub toasts: adw::ToastOverlay,
     /// Shown under the header while a job runs: the progress bar, plus Cancel when the job can stop.
     pub bar: gtk::Box,
+    title: gtk::Label,
     progress: gtk::ProgressBar,
+    /// "42% · about 2 min left"
+    detail: gtk::Label,
     cancel: gtk::Button,
     undo: RefCell<Vec<Undo>>,
 }
@@ -692,13 +695,16 @@ enum ExtractErr {
 /// destination as `name`.
 struct Unpacked {
     tmp: PathBuf,
+    /// unsafe links 7-Zip refused to create
+    skipped: usize,
     src: gio::File,
     name: String,
 }
 
 /// Extract `archive` into `out` with the sandboxed 7-Zip, feeding its percentage to the
 /// progress bar. The password goes over stdin, not argv, so other users can't read it from /proc.
-fn run_7z(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<(), ExtractErr> {
+/// Returns how many unsafe links 7-Zip refused to create (see `outcome`).
+fn run_7z(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<usize, ExtractErr> {
     use std::io::{Read, Write};
     use std::process::Stdio;
     let mut cmd = sandboxed(&seven_zip(), archive, out);
@@ -729,16 +735,50 @@ fn run_7z(archive: &Path, out: &Path, pw: Option<&str>, p: &Progress) -> Result<
         child.wait().is_ok_and(|s| s.success())
     });
     if p.cancel.is_cancelled() {
-        Err(ExtractErr::Cancelled)
-    } else if ok {
-        p.done.store(100, Ordering::Relaxed); // small archives finish before any percentage prints
-        Ok(())
-    } else if msgs.contains("Wrong password") {
-        Err(ExtractErr::Password)
-    } else {
-        let last = msgs.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "ERRORS:").last();
-        Err(ExtractErr::Other(last.unwrap_or("failed").to_string()))
+        return Err(ExtractErr::Cancelled);
     }
+    let r = outcome(ok, &msgs);
+    if r.is_ok() {
+        p.done.store(100, Ordering::Relaxed); // small archives finish before any percentage prints
+    }
+    r
+}
+
+/// 7-Zip's verdict from its exit status and messages. Links pointing outside the output or at
+/// themselves (Ubuntu ISOs have `ubuntu -> .`) are refused as "Dangerous link path" and the run
+/// "fails", though every file came out: that's a success with N links skipped.
+fn outcome(ok: bool, msgs: &str) -> Result<usize, ExtractErr> {
+    if ok {
+        return Ok(0);
+    }
+    if msgs.contains("Wrong password") {
+        return Err(ExtractErr::Password);
+    }
+    let errors: Vec<&str> = msgs.lines().filter_map(|l| l.split_once("ERROR:").map(|(_, e)| e.trim())).collect();
+    if !errors.is_empty() && errors.iter().all(|e| e.starts_with("Dangerous link path")) {
+        return Ok(errors.len());
+    }
+    let last = errors
+        .last()
+        .copied()
+        .or_else(|| msgs.lines().map(str::trim).filter(|l| !l.is_empty() && *l != "ERRORS:").last());
+    Err(ExtractErr::Other(last.unwrap_or("failed").to_string()))
+}
+
+/// "42%", then "42% · about 2 min left" once there's enough history to guess from.
+fn progress_text(f: f64, elapsed: std::time::Duration) -> String {
+    let pct = format!("{:.0}%", f * 100.0);
+    if f < 0.02 || f >= 1.0 || elapsed.as_secs() < 3 {
+        return pct;
+    }
+    let left = (elapsed.as_secs_f64() * (1.0 - f) / f) as u64;
+    let left = match left {
+        0..10 => "a few seconds left".to_string(),
+        10..60 => format!("{} s left", left / 5 * 5),
+        60..5400 => format!("about {} min left", left.div_ceil(60)),
+        _ => format!("about {} h left", (left as f64 / 3600.0).round()),
+    };
+    format!("{pct} · {left}")
 }
 
 fn plural(n: usize, one: &str) -> String {
@@ -747,24 +787,33 @@ fn plural(n: usize, one: &str) -> String {
 
 impl Ops {
     pub fn new(toasts: adw::ToastOverlay) -> Rc<Ops> {
-        let progress = gtk::ProgressBar::builder()
-            .css_classes(["osd"])
-            .hexpand(true)
-            .valign(gtk::Align::Center)
-            .build();
+        let progress = gtk::ProgressBar::builder().hexpand(true).valign(gtk::Align::Center).build();
+        let title = gtk::Label::builder().ellipsize(gtk::pango::EllipsizeMode::Middle).max_width_chars(40).build();
+        let detail = gtk::Label::builder().css_classes(["dim-label", "numeric"]).build();
         let cancel = gtk::Button::builder()
             .icon_name("process-stop-symbolic")
             .tooltip_text("Cancel")
             .css_classes(["flat", "circular"])
             .visible(false)
             .build();
-        let bar = gtk::Box::builder().spacing(6).visible(false).build();
+        let bar = gtk::Box::builder()
+            .spacing(12)
+            .margin_start(12)
+            .margin_end(6)
+            .margin_top(4)
+            .margin_bottom(4)
+            .visible(false)
+            .build();
+        bar.append(&title);
         bar.append(&progress);
+        bar.append(&detail);
         bar.append(&cancel);
         Rc::new(Ops {
             toasts,
             bar,
+            title,
             progress,
+            detail,
             cancel,
             undo: RefCell::default(),
         })
@@ -785,18 +834,23 @@ impl Ops {
     }
 
     /// Run `work` on a worker thread with a live progress bar, then `then` on the main thread.
-    fn job<T: Send + 'static>(self: &Rc<Self>, work: impl FnOnce(&Progress) -> T + Send + 'static, then: impl FnOnce(&Rc<Ops>, T) + 'static) {
+    fn job<T: Send + 'static>(self: &Rc<Self>, title: String, work: impl FnOnce(&Progress) -> T + Send + 'static, then: impl FnOnce(&Rc<Ops>, T) + 'static) {
         let p = Arc::new(Progress::default());
-        let (bar, cancel) = (self.progress.clone(), self.cancel.clone());
+        let (bar, cancel, detail) = (self.progress.clone(), self.cancel.clone(), self.detail.clone());
         bar.set_fraction(0.0);
+        detail.set_label("");
+        self.title.set_label(&title);
         self.bar.set_visible(true);
+        let start = std::time::Instant::now();
         let pc = p.clone();
         let clicked = cancel.connect_clicked(move |_| pc.cancel.cancel());
         let pw = p.clone();
         let tick = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             let (d, t) = (pw.done.load(Ordering::Relaxed), pw.total.load(Ordering::Relaxed));
             if t > 0 {
-                bar.set_fraction(d as f64 / t as f64);
+                let f = (d as f64 / t as f64).min(1.0);
+                bar.set_fraction(f);
+                detail.set_label(&progress_text(f, start.elapsed()));
             } else {
                 bar.pulse();
             }
@@ -869,6 +923,7 @@ impl Ops {
 
     fn run_transfer(self: &Rc<Self>, op: Op, srcs: Vec<gio::File>, dest: gio::File, policy: Conflict) {
         self.job(
+            format!("{} {}", if op == Op::Copy { "Copying" } else { "Moving" }, plural(srcs.len(), "item")),
             move |p| transfer(op, &srcs, &dest, policy, p),
             move |me, r| match r {
                 Ok(t) if t.pairs.is_empty() => me.toast("Nothing to do"),
@@ -899,6 +954,7 @@ impl Ops {
             return;
         }
         self.job(
+            format!("Moving {} to the Trash", plural(files.len(), "item")),
             move |_| {
                 let mut done = Vec::new();
                 for f in &files {
@@ -942,6 +998,7 @@ impl Ops {
             }
             let files = files.clone();
             me.job(
+                format!("Deleting {}", plural(files.len(), "item")),
                 move |_| {
                     for f in &files {
                         delete_tree(f).map_err(|e| e.message().to_string())?;
@@ -969,6 +1026,7 @@ impl Ops {
             return;
         }
         self.job(
+            format!("Restoring {}", plural(items.len(), "item")),
             move |_| restore_items(&items),
             |me, r| match r {
                 Ok(n) => me.toast(&format!("Restored {}", plural(n, "item"))),
@@ -991,6 +1049,7 @@ impl Ops {
                 return;
             }
             me.job(
+                "Emptying the Trash".to_string(),
                 |_| {
                     let mut n = 0;
                     for sub in ["files", "info", "expunged"] {
@@ -1108,6 +1167,7 @@ impl Ops {
         };
         cmd.current_dir(cwd);
         self.job(
+            format!("Compressing {name}"),
             move |_| run(cmd).map(|_| dest),
             |me, r| match r {
                 Ok(dest) => me.toast_undo(&format!("Created {}", dest.basename().unwrap_or_default().display()), Undo::Created(dest)),
@@ -1142,6 +1202,7 @@ impl Ops {
         let had_pw = pw.is_some();
         let retry = file.clone();
         self.job(
+            format!("Extracting {name}"),
             move |p| -> Result<Unpacked, ExtractErr> {
                 let other = |e: std::io::Error| ExtractErr::Other(e.to_string());
                 let tpath = tmp.path().ok_or(ExtractErr::Other("no path".into()))?;
@@ -1156,7 +1217,7 @@ impl Ops {
                     match c.spawn() {
                         Ok(child) => match killable(p, child.id(), || child.wait_with_output()) {
                             _ if p.cancel.is_cancelled() => Err(ExtractErr::Cancelled),
-                            Ok(out) => check(out).map_err(ExtractErr::Other),
+                            Ok(out) => check(out).map(|_| 0).map_err(ExtractErr::Other),
                             Err(e) => Err(other(e)),
                         },
                         Err(e) => Err(other(e)),
@@ -1164,16 +1225,24 @@ impl Ops {
                 } else {
                     run_7z(&path, &tpath, pw.as_deref(), p)
                 };
-                if let Err(e) = r {
-                    let _ = std::fs::remove_dir_all(&tpath);
-                    return Err(e);
-                }
+                let skipped = match r {
+                    Ok(n) => n,
+                    Err(e) => {
+                        let _ = std::fs::remove_dir_all(&tpath);
+                        return Err(e);
+                    }
+                };
                 let entries: Vec<_> = std::fs::read_dir(&tpath).map_err(other)?.flatten().collect();
                 let (src, name) = match entries.as_slice() {
                     [one] => (gio::File::for_path(one.path()), one.file_name().to_string_lossy().into_owned()),
                     _ => (tmp.clone(), final_name),
                 };
-                Ok(Unpacked { tmp: tpath, src, name })
+                Ok(Unpacked {
+                    tmp: tpath,
+                    skipped,
+                    src,
+                    name,
+                })
             },
             move |me, r| match r {
                 Ok(u) if !dir.child(&u.name).query_exists(gio::Cancellable::NONE) => me.land(u, dir, Conflict::KeepBoth),
@@ -1201,7 +1270,9 @@ impl Ops {
     /// Move an unpacked archive from its staging folder into `dir`, resolving a name clash
     /// with `policy` (Skip throws the unpacked copy away).
     fn land(self: &Rc<Self>, u: Unpacked, dir: gio::File, policy: Conflict) {
+        let skipped = u.skipped;
         self.job(
+            format!("Moving {} into place", u.name),
             move |_| -> Result<Option<(gio::File, Option<PathBuf>)>, String> {
                 let target = dir.child(&u.name);
                 let mut replaced = None;
@@ -1227,10 +1298,13 @@ impl Ops {
                 r.map_err(|e| e.message().to_string())?;
                 Ok(Some((dest, replaced)))
             },
-            |me, r| match r {
+            move |me, r| match r {
                 Ok(None) => me.toast("Nothing extracted"),
                 Ok(Some((dest, replaced))) => {
                     let mut msg = format!("Extracted {}", dest.basename().unwrap_or_default().display());
+                    if skipped > 0 {
+                        msg += &format!(", skipped {}", plural(skipped, "unsafe link"));
+                    }
                     let undo = match replaced {
                         Some(old) => {
                             msg += ", replaced 1";
@@ -1269,7 +1343,11 @@ impl Ops {
             return;
         };
         // gio::File is thread-safe; the closure only moves Files/PathBufs
-        self.job(move |_| run_undo(u), |me, r| me.toast(&r.unwrap_or_else(|e| format!("Undo failed: {e}"))));
+        self.job(
+            "Undoing".to_string(),
+            move |_| run_undo(u),
+            |me, r| me.toast(&r.unwrap_or_else(|e| format!("Undo failed: {e}"))),
+        );
     }
 
     /// Clipboard in the formats Nautilus reads and writes, so copy/paste works between them.
@@ -1488,6 +1566,20 @@ mod tests {
         assert_eq!(archive_ext("Photos.TAR.GZ"), Some(".tar.gz"));
         assert_eq!(archive_ext("disk.iso"), Some(".iso"));
         assert_eq!(archive_ext("report.docx"), None);
+    }
+
+    #[test]
+    fn seven_zip_outcomes() {
+        let iso = "  0M Scan /home/alex/Projects/tvbox/build/\nERROR: Dangerous link path was ignored : ubuntu : ./\n\nERRORS:\n";
+        assert!(matches!(outcome(false, iso), Ok(1)));
+        let bad = "  0M Scan /x/\nERROR: Data Error : src/r.bin\nERROR: Dangerous link path was ignored : a : ../\n";
+        assert!(matches!(outcome(false, bad), Err(ExtractErr::Other(e)) if e == "Dangerous link path was ignored : a : ../"));
+        assert!(matches!(outcome(false, "ERROR: Data Error : src/r.bin\n"), Err(ExtractErr::Other(e)) if e == "Data Error : src/r.bin"));
+        assert!(matches!(outcome(false, "ERROR: Wrong password : a.txt\n"), Err(ExtractErr::Password)));
+        assert!(matches!(outcome(true, ""), Ok(0)));
+        assert_eq!(progress_text(0.5, std::time::Duration::from_secs(1)), "50%");
+        assert_eq!(progress_text(0.25, std::time::Duration::from_secs(60)), "25% · about 3 min left");
+        assert_eq!(progress_text(0.5, std::time::Duration::from_secs(20)), "50% · 20 s left");
     }
 
     #[test]

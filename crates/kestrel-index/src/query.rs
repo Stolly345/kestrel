@@ -7,6 +7,8 @@
 //! children), `under:/dir` (everything below), `depth:2` `depth:<3`, `empty:` (empty folders),
 //! `content:text` (reads files; slow), `dupe:` (same name), `sizedupe:` (same size),
 //! `namesizedupe:` (both).
+//! A bare `.deb` ranks .deb files first; bare `pdf` `word` `excel` `powerpoint` (and
+//! `spreadsheet` `presentation`) also match files of that type and rank them first.
 //! Ranges: `size:>1gb` `size:1mb..10mb` `size:empty|tiny|small|medium|large|huge|gigantic`,
 //! `dm:today|yesterday|thisweek|thismonth|thisyear|last<N><day|week|month|year>s|2026|2026-10|2026-10-25`.
 
@@ -22,6 +24,8 @@ pub struct Query {
     pub dupe: Option<Dupe>,
     /// Some leaf opens files: permissions must be checked before matching, not after.
     pub reads: bool,
+    /// Extensions the user typed as a type (`.deb`, `excel`): those hits rank first.
+    pub boost: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,12 +90,21 @@ impl Pat {
 impl Query {
     pub fn parse(s: &str) -> Result<Query, String> {
         let mut dupe = None;
-        let mut toks = tokens(s).into_iter();
-        let root = Node::All(seq(&mut toks, &mut dupe, false)?);
+        let toks = tokens(s);
+        let mut boost = Vec::new();
+        for t in &toks {
+            let t = t.to_lowercase();
+            match t.strip_prefix('.') {
+                Some(e) if !e.is_empty() && e.bytes().all(|b| b.is_ascii_alphanumeric()) => boost.push(e.as_bytes().to_vec()),
+                _ => boost.extend(type_word(&t).map(ext_list).unwrap_or_default()),
+            }
+        }
+        let root = Node::All(seq(&mut toks.into_iter(), &mut dupe, false)?);
         Ok(Query {
             reads: cost(&root) >= 3,
             root,
             dupe,
+            boost,
         })
     }
 
@@ -249,6 +262,17 @@ fn macro_exts(m: &str) -> Option<&'static str> {
     })
 }
 
+/// File types people search for by name: a bare word that also means "files of this type".
+fn type_word(w: &str) -> Option<&'static str> {
+    Some(match w {
+        "pdf" => "pdf",
+        "word" => "doc;docx;docm;dot;dotx;odt;rtf",
+        "excel" | "spreadsheet" | "spreadsheets" => "xls;xlsx;xlsm;xlsb;xlt;xltx;ods;csv",
+        "powerpoint" | "presentation" | "presentations" => "ppt;pptx;pptm;pps;ppsx;odp",
+        _ => return None,
+    })
+}
+
 fn ext_list(v: &str) -> Vec<Vec<u8>> {
     v.split(';')
         .filter(|s| !s.is_empty())
@@ -379,6 +403,8 @@ fn term(t: &str, dupe: &mut Option<Dupe>) -> Result<Option<Node>, String> {
         }
         t = v;
     }
+    // a bare type word: the name containing it, or a file of that type
+    let typed = (!re && !path && !case && leaves.is_empty()).then(|| type_word(&t.to_lowercase())).flatten();
     if !t.is_empty() {
         let pat = if re {
             let src = if case { t.to_string() } else { format!("(?i){t}") };
@@ -401,6 +427,12 @@ fn term(t: &str, dupe: &mut Option<Dupe>) -> Result<Option<Node>, String> {
     } else {
         Node::All(leaves.into_iter().map(Node::Leaf).collect())
     };
+    if let Some(exts) = typed {
+        node = Node::Any(vec![
+            node,
+            Node::All(vec![Node::Leaf(Leaf::Folder(false)), Node::Leaf(Leaf::Ext(ext_list(exts)))]),
+        ]);
+    }
     if neg {
         node = Node::Not(Box::new(node));
     }
@@ -674,6 +706,30 @@ mod tests {
         assert_eq!(n("da:today file:"), ["Écoles CAFÉ.txt"]);
         assert_eq!(n("dc:<2000"), Vec::<String>::new(), "unknown birth time never matches");
         assert_eq!(n("len:9"), ["straße.md"], "characters, not bytes");
+    }
+
+    #[test]
+    fn typed_types_rank_first() {
+        let now = Local::now().timestamp();
+        let mut ix = Index::default();
+        let root = ix.push(NO_PARENT, b"/", Kind::Dir, 0, 0, 0o755, 0, 0);
+        for n in ["a.iso.xml", "b.iso", "Budget.XLSX", "excel tips.txt", "password.txt", "report.docx", "z.iso"] {
+            ix.push(root, n.as_bytes(), Kind::File, 1, now, 0o644, 0, 0);
+        }
+        ix.push(root, b"word", Kind::Dir, 0, now, 0o755, 0, 0);
+        let run = |q: &str| -> Vec<String> {
+            let q = Query::parse(q).unwrap();
+            ix.search(&q, Sort::Name, false, None)
+                .into_iter()
+                .map(|i| String::from_utf8_lossy(ix.name(i)).into_owned())
+                .collect()
+        };
+        assert_eq!(run(".iso"), ["b.iso", "z.iso", "a.iso.xml"]);
+        assert_eq!(run("excel"), ["Budget.XLSX", "excel tips.txt"]);
+        assert_eq!(run("budget excel"), ["Budget.XLSX"]);
+        assert_eq!(run("word"), ["report.docx", "password.txt", "word"]);
+        assert_eq!(run("case:word"), ["password.txt", "word"], "modifiers turn type words off");
+        assert_eq!(run("!excel"), ["/", "a.iso.xml", "b.iso", "password.txt", "report.docx", "word", "z.iso"]);
     }
 
     #[test]

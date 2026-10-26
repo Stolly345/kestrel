@@ -382,3 +382,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   read-only binds every volume with the same stem (`fileops::volumes`: .001…, .z01…/.zip, .partN.rar, .rar/.rNN).
   Old-style RAR parts (.r00…) extract from the .rar (`first_volume`). Extract now offered on .war .whl .crx .epub
   .cbz .r00. Office/OpenDocument stay preview-only (no Extract item).
+- **v0.9.12 (2026-10-26): visible progress, ISO extract fix, type-aware search.** Jobs show a bottom row: what's
+  running ("Extracting x.iso"), a progress bar, "42% · about 2 min left", Cancel (was a thin OSD line under the
+  header nobody saw). Ubuntu ISOs contain `ubuntu -> .`; 7-Zip refuses it as "Dangerous link path" and exits 2, so
+  Kestrel deleted a complete 2.8 GB extraction and toasted a progress fragment ("0M Scan …"). Now refused links count
+  as skipped ("Extracted x, skipped 1 unsafe link") and real failures show 7-Zip's ERROR line (`fileops::outcome`).
+  Search: a bare `.deb` ranks .deb files first (no more vnd.efi.iso.xml above the ISOs); bare `pdf`, `word`, `excel`,
+  `powerpoint`, `spreadsheet`, `presentation` also match files of that type and rank them first (`budget excel` finds
+  Budget.xlsx). Ranking is daemon-side (`Query::boost`); smoke-live 15/15 as Alex on 0.9.12.
