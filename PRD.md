@@ -344,3 +344,16 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   capture-phase events: press on a Size/Modified/Type header, release over another one, and it moves there (saved).
   Name/Git/Folder can't be moved or dropped onto; a resize drag (width changed) never reorders; clicks still sort.
   New app icon: kestrel head on a yellow folder (Gemini-generated, background cut out, 512 px PNG embedded in the SVG).
+- **v0.9.6 (2026-10-26): search box fills the header.** In a non-maximised window it sat off-centre: AdwHeaderBar
+  centres its title between equal-width sides and the right side (scope, View, menu, preview, window buttons) is
+  ~360 px vs ~120 px on the left, so GTK shoved it left. Alex: don't centre it, stretch it from the up arrow to the
+  search-syntax (i) button. The whole header row is now one full-width title box (nav buttons, search, end buttons,
+  gtk::WindowControls in place of the header bar's own); the search box takes all the space between.
+- **v0.9.7 (2026-10-26): Extract To…, many more extractable formats.** Right-click (and palette) → Extract To…
+  picks a folder (FileDialog, starts in the current folder) and runs the same sandboxed extract there. Extract was
+  only offered for 10 extensions; it now covers everything the bundled 7-Zip reads that is an archive, package or
+  disk image (~70 extensions: .iso .img .dmg .vhd(x) .vmdk .qcow2 .deb .rpm .msi .cab .wim .squashfs .apk …), from
+  one list (`fileops::ARCHIVE_EXTS`) that also names the output folder. Full list: docs/extract-formats.md.
+  Search box: Alex says it "doesn't resize at all" between windowed and maximised; on headless GNOME Shell (Wayland,
+  1536 px virtual monitor, Alex's own config) the entry measures 393 px windowed (1200) and 669 px maximised, so
+  still unexplained — needs a screenshot from Alex.

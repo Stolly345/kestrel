@@ -138,6 +138,7 @@ fn menus() -> (gio::Menu, gio::Menu) {
     s.append_item(&tags);
     s.append(Some("Compress…"), Some("win.compress"));
     s.append(Some("Extract Here"), Some("win.extract"));
+    s.append(Some("Extract To…"), Some("win.extract-to"));
     s.append(Some("Browse Archive"), Some("win.browse-archive"));
     item.append_section(None, &s);
     let s = gio::Menu::new();
@@ -225,7 +226,7 @@ impl Win {
         let entry = gtk::SearchEntry::builder()
             .placeholder_text("Search files…   e.g. invoice ext:pdf dm:thismonth")
             .hexpand(true)
-            .width_request(220)
+            .width_request(160)
             .css_classes(["main-search"])
             .build();
         let scope = gtk::DropDown::from_strings(&Scope::ALL.map(|s| s.label()));
@@ -247,15 +248,9 @@ impl Win {
                     .build(),
             )
             .build();
-        let row = gtk::Box::builder().spacing(6).css_classes(["search-row"]).build();
+        let row = gtk::Box::builder().spacing(6).hexpand(true).css_classes(["search-row"]).build();
         row.append(&entry);
         row.append(&help);
-        let clamp = adw::Clamp::builder()
-            .maximum_size(760)
-            .tightening_threshold(560)
-            .child(&row)
-            .hexpand(true)
-            .build();
         let history = gtk::Popover::builder().autohide(false).has_arrow(false).halign(gtk::Align::Start).build();
         history.set_parent(&entry);
         let (scope_w, help_w) = (scope.clone(), help.clone());
@@ -306,8 +301,17 @@ impl Win {
             .revealed(false)
             .build();
 
-        let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&clamp));
+        // the whole row is one title widget: AdwHeaderBar centres a title between equal-width sides, so a
+        // search box there could never reach the up arrow. Here it fills from the arrows to the end buttons.
+        let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
+        let hrow = gtk::Box::builder().spacing(6).hexpand(true).build();
+        let ends = gtk::Box::builder().spacing(6).build();
+        header.set_title_widget(Some(&hrow));
+        for side in [gtk::PackType::Start, gtk::PackType::End] {
+            let c = gtk::WindowControls::new(side);
+            c.bind_property("empty", &c, "visible").invert_boolean().sync_create().build();
+            if side == gtk::PackType::Start { hrow.append(&c) } else { ends.append(&c) }
+        }
         let btn = |icon: &str, action: &str, tip: &str| gtk::Button::builder().icon_name(icon).action_name(action).tooltip_text(tip).build();
         let back_btn = btn("go-previous-symbolic", "win.back", "Back (Alt+Left)");
         let fwd_btn = btn("go-next-symbolic", "win.forward", "Forward (Alt+Right)");
@@ -326,10 +330,10 @@ impl Win {
         let side_toggle = side_btn();
         let content_toggle = side_btn();
         split.bind_property("show-sidebar", &content_toggle, "visible").invert_boolean().sync_create().build();
-        header.pack_start(&content_toggle);
-        header.pack_start(&back_btn);
-        header.pack_start(&fwd_btn);
-        header.pack_start(&up_btn);
+        hrow.append(&content_toggle);
+        hrow.append(&back_btn);
+        hrow.append(&fwd_btn);
+        hrow.append(&up_btn);
 
         let app_menu = gio::Menu::new();
         let s = gio::Menu::new();
@@ -343,14 +347,14 @@ impl Win {
         s.append(Some("About Kestrel"), Some("win.about"));
         app_menu.append_section(None, &s);
         // mirrors the sidebar toggle in the top-right corner
-        header.pack_end(
+        ends.prepend(
             &gtk::ToggleButton::builder()
                 .icon_name("sidebar-show-right-symbolic")
                 .tooltip_text("Preview Pane (Alt+P)")
                 .action_name("win.preview")
                 .build(),
         );
-        header.pack_end(
+        ends.prepend(
             &gtk::MenuButton::builder()
                 .icon_name("open-menu-symbolic")
                 .menu_model(&app_menu)
@@ -370,7 +374,7 @@ impl Win {
         v.append(Some("Preview Pane"), Some("win.preview"));
         v.append(Some("Show Hidden Files"), Some("win.show-hidden"));
         view_menu.append_section(None, &v);
-        header.pack_end(
+        ends.prepend(
             &gtk::MenuButton::builder()
                 .icon_name("view-grid-symbolic")
                 .menu_model(&view_menu)
@@ -378,7 +382,9 @@ impl Win {
                 .build(),
         );
         // what to search sits with the view controls, right against the View button
-        header.pack_end(&scope_w);
+        ends.prepend(&scope_w);
+        hrow.append(&row);
+        hrow.append(&ends);
 
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
@@ -558,9 +564,7 @@ impl Win {
         let folder = infos.iter().any(|i| i.file_type() == gio::FileType::Directory);
         let archive = infos.iter().any(|i| {
             let n = i.name().to_string_lossy().to_lowercase();
-            [".zip", ".7z", ".rar", ".tar", ".tgz", ".txz", ".gz", ".xz", ".zst", ".bz2"]
-                .iter()
-                .any(|e| n.ends_with(e))
+            crate::fileops::archive_ext(&n).is_some()
         });
         let trash = b.as_ref().is_some_and(|b| b.is_trash());
         let in_dir = b.as_ref().is_some_and(|b| b.dir().is_some()) && !trash;
@@ -581,6 +585,7 @@ impl Win {
             ("tag", any),
             ("compress", any),
             ("extract", archive),
+            ("extract-to", archive),
             ("browse-archive", archive),
             ("paste", in_dir),
             ("new-folder", in_dir),
@@ -1269,8 +1274,23 @@ impl Win {
         });
         self.act("extract", |w| {
             for f in w.sel() {
-                w.ops.extract(f);
+                w.ops.extract(f, None);
             }
+        });
+        self.act("extract-to", |w| {
+            let files = w.sel();
+            let fd = gtk::FileDialog::builder().title("Extract To").accept_label("Extract Here").modal(true).build();
+            if let Some(d) = w.current().and_then(|b| b.dir()).or_else(|| files.first().and_then(|f| f.parent())) {
+                fd.set_initial_folder(Some(&d));
+            }
+            let ops = w.ops.clone();
+            fd.select_folder(Some(&w.window), gio::Cancellable::NONE, move |r| {
+                if let Ok(dest) = r {
+                    for f in &files {
+                        ops.extract(f.clone(), Some(dest.clone()));
+                    }
+                }
+            });
         });
         self.act("browse-archive", |w| {
             if let Some(f) = w.sel().into_iter().next() {

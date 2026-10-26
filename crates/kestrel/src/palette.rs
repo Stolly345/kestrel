@@ -44,6 +44,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Properties", "win.properties", None),
     ("Compress…", "win.compress", None),
     ("Extract here", "win.extract", None),
+    ("Extract to…", "win.extract-to", None),
     ("Browse archive", "win.browse-archive", None),
     ("Tag: red", "win.tag", Some("red")),
     ("Tag: orange", "win.tag", Some("orange")),

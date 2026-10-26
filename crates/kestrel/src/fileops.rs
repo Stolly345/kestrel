@@ -380,8 +380,35 @@ pub struct Ops {
     undo: RefCell<Vec<Undo>>,
 }
 
+/// Every extension Kestrel offers Extract on: what the bundled 7-Zip reads (`7zz i`) that is
+/// really an archive, package or disk image. Documents and programs 7-Zip can also open (.docx,
+/// .exe, .dll, ELF) are left out so Extract isn't offered on every Word file. Compound
+/// extensions (.tar.gz) must come before their tail (.gz): the first match names the output folder.
+/// Keep in sync with docs/extract-formats.md.
+pub const ARCHIVE_EXTS: &[&str] = &[
+    // tarballs (system tar, sandboxed)
+    ".tar.gz", ".tar.xz", ".tar.zst", ".tar.bz2", ".tar.z", ".tgz", ".tpz", ".txz", ".tzst", ".tbz2", ".tbz",
+    ".taz", ".tar", ".ova",
+    // archives
+    ".7z", ".zip", ".zipx", ".rar", ".cab", ".arj", ".lzh", ".lha", ".cpio", ".xar", ".wim", ".swm", ".esd",
+    ".chm", ".z01", ".001",
+    // single-file compression
+    ".gz", ".gzip", ".xz", ".bz2", ".bzip2", ".zst", ".lzma", ".z",
+    // packages and installers
+    ".deb", ".udeb", ".rpm", ".msi", ".msp", ".apk", ".jar", ".xpi", ".ipa", ".appx", ".pkg",
+    // disk and file-system images
+    ".iso", ".img", ".dmg", ".udf", ".vhd", ".vhdx", ".vmdk", ".vdi", ".qcow", ".qcow2", ".squashfs",
+    ".cramfs", ".hfs", ".hfsx", ".simg",
+];
+
+/// The `ARCHIVE_EXTS` entry `name` ends with, if any.
+pub fn archive_ext(name: &str) -> Option<&'static str> {
+    let lower = name.to_lowercase();
+    ARCHIVE_EXTS.iter().copied().find(|e| lower.ends_with(e))
+}
+
 fn is_tarball(lower: &str) -> bool {
-    [".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tar.bz2", ".tbz2"]
+    [".tar", ".tar.gz", ".tgz", ".tpz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tbz", ".tar.z", ".taz", ".ova"]
         .iter()
         .any(|e| lower.ends_with(e))
 }
@@ -819,25 +846,24 @@ impl Ops {
         );
     }
 
-    /// Extract next to the archive. A single top-level entry lands directly; otherwise a
-    /// folder named after the archive holds everything (no spilling 500 files into Downloads).
-    pub fn extract(self: &Rc<Self>, file: gio::File) {
-        self.extract_pw(file, None);
+    /// Extract into `into` (None: next to the archive). A single top-level entry lands directly;
+    /// otherwise a folder named after the archive holds everything (no spilling 500 files into Downloads).
+    pub fn extract(self: &Rc<Self>, file: gio::File, into: Option<gio::File>) {
+        self.extract_pw(file, None, into);
     }
 
-    fn extract_pw(self: &Rc<Self>, file: gio::File, pw: Option<String>) {
-        let (Some(path), Some(dir)) = (file.path().and_then(|p| p.canonicalize().ok()), file.parent()) else {
+    fn extract_pw(self: &Rc<Self>, file: gio::File, pw: Option<String>, into: Option<gio::File>) {
+        let (Some(path), Some(dir)) = (file.path().and_then(|p| p.canonicalize().ok()), into.clone().or_else(|| file.parent())) else {
             self.toast("Extracting needs a local file");
             return;
         };
+        if dir.path().is_none() {
+            self.toast("Extracting needs a local folder");
+            return;
+        }
         let name = file.basename().unwrap_or_default().to_string_lossy().into_owned();
         let lower = name.to_lowercase();
-        let stem_len = [
-            ".tar.gz", ".tar.xz", ".tar.zst", ".tar.bz2", ".tgz", ".txz", ".tar", ".zip", ".7z", ".rar", ".gz", ".xz",
-        ]
-        .iter()
-        .find(|e| lower.ends_with(*e))
-        .map_or(name.len(), |e| name.len() - e.len());
+        let stem_len = archive_ext(&name).map_or(name.len(), |e| name.len() - e.len());
         let tmp = unique_child(&dir, &format!(".{}.kestrel-extract", &name[..stem_len]));
         let final_name = name[..stem_len].to_string();
         let had_pw = pw.is_some();
@@ -875,7 +901,7 @@ impl Ops {
                 Err(ExtractErr::Password) => {
                     let title = if had_pw { "Wrong Password" } else { "Password Required" };
                     let m = me.clone();
-                    me.ask_password(title, &name, move |pw| m.extract_pw(retry.clone(), Some(pw)));
+                    me.ask_password(title, &name, move |pw| m.extract_pw(retry.clone(), Some(pw), into.clone()));
                 }
                 Err(ExtractErr::Other(e)) => me.toast(&format!("Extract failed: {e}")),
             },
@@ -1114,6 +1140,19 @@ mod tests {
 
     /// Sandboxed bundled 7-Zip: extracts, asks for a password, and can't write outside `out`.
     /// Needs KESTREL_7ZZ=packaging/7zip/7zz (scripts/update-7zip.sh fetches it); skipped otherwise.
+    #[test]
+    fn archive_exts_compound_first() {
+        // a later entry ending in an earlier one could never match (".tar.gz" after ".gz")
+        for (i, a) in ARCHIVE_EXTS.iter().enumerate() {
+            for b in &ARCHIVE_EXTS[i + 1..] {
+                assert!(!b.ends_with(a), "{b} is shadowed by {a}");
+            }
+        }
+        assert_eq!(archive_ext("Photos.TAR.GZ"), Some(".tar.gz"));
+        assert_eq!(archive_ext("disk.iso"), Some(".iso"));
+        assert_eq!(archive_ext("report.docx"), None);
+    }
+
     #[test]
     fn sandboxed_7z() {
         let Ok(z) = std::env::var("KESTREL_7ZZ") else { return };
