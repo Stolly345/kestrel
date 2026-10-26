@@ -357,3 +357,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Search box: Alex says it "doesn't resize at all" between windowed and maximised; on headless GNOME Shell (Wayland,
   1536 px virtual monitor, Alex's own config) the entry measures 393 px windowed (1200) and 669 px maximised, so
   still unexplained — needs a screenshot from Alex.
+- **v0.9.8 (2026-10-26): every runtime dependency declared.** Depends adds gzip, xz-utils, bzip2, zstd (tarball
+  decompressors tar calls), gvfs (trash://, recent://, network://), xdg-utils (default-file-manager hookup) and pkexec
+  ("Start Service"); Recommends adds ncompress (.tar.z/.taz). `sudo apt install ./kestrel_*.deb` lists whatever a
+  machine is missing and asks once (Y/n); `--no-install-recommends` skips the previews/terminal/ncompress extras.

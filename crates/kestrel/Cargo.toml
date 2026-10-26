@@ -27,10 +27,10 @@ details/grid/column views, preview pane, git status, color tags and a command \
 palette. Includes the `ks` command-line search client."""
 section = "utils"
 priority = "optional"
-depends = "$auto, bubblewrap, tar"
+depends = "$auto, bubblewrap, tar, gzip, xz-utils, bzip2, zstd, gvfs, xdg-utils, pkexec"
 conflicts = "chimera"
 replaces = "chimera"
-recommends = "gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
+recommends = "ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
 conf-files = ["/etc/kestrel/excludes"]
 maintainer-scripts = "../../packaging/debian/"
 assets = [
