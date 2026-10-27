@@ -392,8 +392,9 @@ type PageKey = (String, Sort, bool, u64);
 
 fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<()> {
     let mut out = conn.try_clone()?;
-    // last result on this connection, for paging: (query, sort, desc, epoch) -> hits
-    let mut cache: Option<(PageKey, Vec<u32>)> = None;
+    let fd = conn.as_raw_fd();
+    // last result on this connection, for paging: (query, sort, desc, epoch) -> (hits, how many are sorted)
+    let mut cache: Option<(PageKey, Vec<u32>, usize)> = None;
     let (mut r, mut line) = (BufReader::new(conn), Vec::new());
     while read_line_limited(&mut r, &mut line)? > 0 {
         let resp = match serde_json::from_slice::<Request>(&line) {
@@ -414,10 +415,18 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
                 Ok(q) => {
                     let ix = ix.read().unwrap();
                     let key = (req.q.clone(), req.sort, req.desc, ix.epoch);
-                    if !(req.more && cache.as_ref().is_some_and(|(k, _)| *k == key)) {
-                        cache = Some((key, ix.search(&q, req.sort, req.desc, Some(cred))));
+                    let want = req.limit.map(|l| req.offset.saturating_add(l));
+                    if !(req.more && cache.as_ref().is_some_and(|(k, ..)| *k == key)) {
+                        let (hits, sorted) = search_unless_hung_up(&ix, &q, &req, cred, want, fd);
+                        cache = Some((key, hits, sorted));
                     }
-                    let hits = &cache.as_ref().unwrap().1;
+                    let (_, hits, sorted) = cache.as_mut().unwrap();
+                    // scrolled past the sorted head: finish the sort once
+                    if want.is_none_or(|w| w > *sorted) && *sorted < hits.len() {
+                        ix.sort_rest(&mut hits[*sorted..], &q, req.sort, req.desc);
+                        *sorted = hits.len();
+                    }
+                    let hits = &*hits;
                     let page = hits.iter().skip(req.offset).take(req.limit.unwrap_or(usize::MAX));
                     let hits_out = page
                         .filter(|&&i| ix.entries[i as usize].kind != Kind::Gone)
@@ -431,12 +440,13 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
                             }
                         })
                         .collect();
-                    let bytes = hits
+                    // only the first request of a query shows the total size; page fetches skip the pass
+                    let bytes = if req.more { 0 } else { hits
                         .iter()
                         .map(|&i| &ix.entries[i as usize])
                         .filter(|e| e.kind == Kind::File)
                         .map(|e| e.size)
-                        .sum();
+                        .sum() };
                     Response {
                         total: hits.len(),
                         bytes,
@@ -451,6 +461,28 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
         out.write_all(b"\n")?;
     }
     Ok(())
+}
+
+/// Search, giving up if the client hangs up meanwhile (it started a newer query).
+fn search_unless_hung_up(ix: &Index, q: &Query, req: &Request, cred: &Cred, top: Option<usize>, fd: std::os::fd::RawFd) -> (Vec<u32>, usize) {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    let (cancel, done) = (AtomicBool::new(false), AtomicBool::new(false));
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let mut p = libc::pollfd { fd, events: libc::POLLRDHUP, revents: 0 };
+            while !done.load(Relaxed) {
+                // ponytail: 5 ms tick, the most a finished search waits to join; an eventfd if that ever shows
+                // SAFETY: one valid pollfd; the fd outlives this scope
+                if unsafe { libc::poll(&mut p, 1, 5) } > 0 && p.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR) != 0 {
+                    cancel.store(true, Relaxed);
+                    return;
+                }
+            }
+        });
+        let r = ix.search_top(q, req.sort, req.desc, Some(cred), top, &cancel);
+        done.store(true, Relaxed);
+        r
+    })
 }
 
 #[cfg(test)]

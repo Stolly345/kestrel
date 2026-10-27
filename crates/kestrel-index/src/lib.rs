@@ -397,6 +397,15 @@ impl Index {
 
     // ponytail: sorts the match set per query; pre-sorted column arrays (Everything's trick) if huge result sets feel slow.
     pub fn search(&self, q: &Query, sort: Sort, desc: bool, cred: Option<&Cred>) -> Vec<u32> {
+        self.search_top(q, sort, desc, cred, None, &std::sync::atomic::AtomicBool::new(false)).0
+    }
+
+    /// `search`, but only the first `top` hits are guaranteed in order: the rest all rank after
+    /// them, unordered until `sort_rest`. A one-character query matches nearly everything, and
+    /// fully sorting millions of hits to show 500 is what made typing `.` hang. Returns the hits
+    /// and how many are sorted. Setting `cancel` makes it give up and return nothing.
+    pub fn search_top(&self, q: &Query, sort: Sort, desc: bool, cred: Option<&Cred>, top: Option<usize>, cancel: &std::sync::atomic::AtomicBool) -> (Vec<u32>, usize) {
+        use std::sync::atomic::Ordering::Relaxed;
         let read_as = if q.reads { cred.cloned() } else { None };
         let mut hits: Vec<u32> = (0..self.len() as u32)
             .into_par_iter()
@@ -404,6 +413,9 @@ impl Index {
             .map_init(
                 || READ_AS.set(read_as.clone()),
                 |_, i| {
+                    if cancel.load(Relaxed) {
+                        return None;
+                    }
                     let e = &self.entries[i as usize];
                     let keep = e.kind != Kind::Gone
                         && if q.reads {
@@ -417,30 +429,57 @@ impl Index {
             )
             .flatten()
             .collect();
-        match sort {
-            Sort::Name => hits.par_sort_unstable_by(|&a, &b| self.lname(a).cmp(self.lname(b)).then(a.cmp(&b))),
-            Sort::Size => hits.par_sort_unstable_by_key(|&i| (self.entries[i as usize].size, i)),
-            Sort::Mtime => hits.par_sort_unstable_by_key(|&i| (self.entries[i as usize].mtime, i)),
-            Sort::Ext => hits.par_sort_unstable_by(|&a, &b| self.ext(a).cmp(&self.ext(b)).then(self.lname(a).cmp(self.lname(b)))),
-            Sort::Path => {
-                let mut keyed: Vec<_> = hits.par_iter().map(|&i| (self.lpath(i), i)).collect();
-                keyed.par_sort_unstable();
-                hits = keyed.into_iter().map(|(_, i)| i).collect();
+        if cancel.load(Relaxed) {
+            return (Vec::new(), 0);
+        }
+        let cmp = self.order(q, sort, desc);
+        match top {
+            // ponytail: Path keys allocate per comparison, and dupes regroup everything; both keep the full sort
+            Some(k) if k < hits.len() && sort != Sort::Path && q.dupe.is_none() => {
+                hits.select_nth_unstable_by(k, &cmp);
+                hits[..k].par_sort_unstable_by(&cmp);
+                return (hits, k);
             }
+            _ => {}
         }
-        if desc {
-            hits.reverse();
-        }
-        if !q.boost.is_empty() {
-            // typed a type (`.deb`, `excel`): those first, each part keeping the chosen order
-            let (mut first, rest): (Vec<u32>, Vec<u32>) = hits.into_iter().partition(|&i| self.ext(i).is_some_and(|e| q.boost.iter().any(|b| b == e)));
-            first.extend(rest);
-            hits = first;
+        if sort == Sort::Path {
+            let boosted = |i: u32| self.boosted(q, i);
+            let mut keyed: Vec<_> = hits.par_iter().map(|&i| (!boosted(i), self.lpath(i), i)).collect();
+            keyed.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then(if desc { (&b.1, b.2).cmp(&(&a.1, a.2)) } else { (&a.1, a.2).cmp(&(&b.1, b.2)) }));
+            hits = keyed.into_iter().map(|(_, _, i)| i).collect();
+        } else {
+            hits.par_sort_unstable_by(&cmp);
         }
         if let Some(d) = q.dupe {
             hits = self.dupes(hits, d);
         }
-        hits
+        let n = hits.len();
+        (hits, n)
+    }
+
+    /// Finish the order `search_top` left partial: pass the unsorted tail.
+    pub fn sort_rest(&self, tail: &mut [u32], q: &Query, sort: Sort, desc: bool) {
+        tail.par_sort_unstable_by(self.order(q, sort, desc));
+    }
+
+    /// Typed a type (`.deb`, `excel`): those rank first, each part keeping the chosen order.
+    fn boosted(&self, q: &Query, i: u32) -> bool {
+        !q.boost.is_empty() && self.ext(i).is_some_and(|e| q.boost.iter().any(|b| b == e))
+    }
+
+    /// Result order as one total comparator, so a partial sort and a full one agree.
+    fn order<'a>(&'a self, q: &'a Query, sort: Sort, desc: bool) -> impl Fn(&u32, &u32) -> std::cmp::Ordering + Sync + 'a {
+        move |&a, &b| {
+            let base = match sort {
+                Sort::Name => self.lname(a).cmp(self.lname(b)),
+                Sort::Size => self.entries[a as usize].size.cmp(&self.entries[b as usize].size),
+                Sort::Mtime => self.entries[a as usize].mtime.cmp(&self.entries[b as usize].mtime),
+                Sort::Ext => self.ext(a).cmp(&self.ext(b)).then(self.lname(a).cmp(self.lname(b))),
+                Sort::Path => self.lpath(a).cmp(&self.lpath(b)),
+            }
+            .then(a.cmp(&b));
+            self.boosted(q, b).cmp(&self.boosted(q, a)).then(if desc { base.reverse() } else { base })
+        }
     }
 
     /// Keep hits whose key another hit shares; stable-sort so each group sits together.

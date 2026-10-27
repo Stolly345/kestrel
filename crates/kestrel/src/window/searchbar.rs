@@ -122,7 +122,7 @@ impl Win {
         self.bar.chips.set_reveal_child(searching);
     }
 
-    /// Every keystroke (after the entry's 75 ms debounce).
+    /// Every keystroke (after the entry's 200 ms debounce).
     pub(super) fn on_search_changed(&self) {
         if let Some(b) = self.current() {
             b.set_search(&self.bar.entry.text());

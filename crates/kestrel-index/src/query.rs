@@ -788,6 +788,28 @@ mod tests {
     }
 
     #[test]
+    fn partial_sort_matches_full() {
+        let ix = fixture();
+        let none = std::sync::atomic::AtomicBool::new(false);
+        for qs in ["", ".txt", "excel"] {
+            let q = Query::parse(qs).unwrap();
+            for sort in [Sort::Name, Sort::Size, Sort::Mtime, Sort::Ext] {
+                for desc in [false, true] {
+                    let full = ix.search(&q, sort, desc, None);
+                    for top in 0..full.len() {
+                        let (mut hits, sorted) = ix.search_top(&q, sort, desc, None, Some(top), &none);
+                        assert_eq!(hits[..sorted], full[..sorted], "{qs:?} {sort:?} {desc} top {top}");
+                        ix.sort_rest(&mut hits[sorted..], &q, sort, desc);
+                        assert_eq!(hits, full, "{qs:?} {sort:?} {desc} top {top} rest");
+                    }
+                }
+            }
+        }
+        let (hits, _) = ix.search_top(&Query::parse("").unwrap(), Sort::Name, false, None, None, &std::sync::atomic::AtomicBool::new(true));
+        assert!(hits.is_empty(), "cancelled");
+    }
+
+    #[test]
     fn sorting() {
         let ix = fixture();
         let q = Query::parse("file:").unwrap();

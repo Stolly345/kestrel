@@ -9,6 +9,7 @@ use kestrel_index::proto::{Hit, Request, Response, socket_path};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -111,8 +112,10 @@ mod imp {
     #[derive(Default)]
     pub struct SearchModel {
         pub state: RefCell<State>,
-        /// Shared with worker threads; page fetches on the main thread wait for an in-flight query.
+        /// The connection that ran the current query (the daemon caches its hits there), for page fetches.
         pub conn: Arc<Mutex<Option<Conn>>>,
+        /// The connection a running query waits on; shut down to make the daemon drop it.
+        pub inflight: RefCell<Option<UnixStream>>,
         /// Bumped per query; answers to older queries are dropped.
         pub generation: Cell<u64>,
     }
@@ -184,13 +187,19 @@ impl SearchModel {
             limit: Some(PAGE as usize),
             more: false,
         };
-        let conn = self.imp().conn.clone();
+        // each query gets its own connection, so it never queues behind a slow one (a bare `.`
+        // matching the whole disk); hanging up the old one tells the daemon to stop working on it
+        self.hang_up();
+        let fresh = Conn::open().ok();
+        *self.imp().inflight.borrow_mut() = fresh.as_ref().and_then(|c| c.w.try_clone().ok());
         let me = self.downgrade();
         glib::spawn_future_local(async move {
             let r2 = req.clone();
             let r = gio::spawn_blocking(move || {
                 let t = Instant::now();
-                ask(&conn, &r2).map(|resp| (resp, t.elapsed().as_millis()))
+                let mut c = fresh.ok_or_else(|| SearchError::Down("The search service isn't running.".to_string()))?;
+                let resp = c.ask(&r2).map_err(|_| SearchError::Down("The search service isn't running.".to_string()))?;
+                Ok((resp, c, t.elapsed().as_millis()))
             })
             .await
             .unwrap_or_else(|_| Err(SearchError::Down("search worker crashed".into())));
@@ -198,6 +207,11 @@ impl SearchModel {
             if me.imp().generation.get() != generation {
                 return;
             }
+            me.imp().inflight.take();
+            let r = r.map(|(resp, c, ms)| {
+                *me.imp().conn.lock().unwrap() = Some(c);
+                (resp, ms)
+            });
             let out = match r {
                 Err(e) => {
                     me.clear();
@@ -229,7 +243,14 @@ impl SearchModel {
     /// Forget results, and drop any answer still in flight.
     pub fn cancel(&self) {
         self.imp().generation.set(self.imp().generation.get() + 1);
+        self.hang_up();
         self.clear();
+    }
+
+    fn hang_up(&self) {
+        if let Some(s) = self.imp().inflight.take() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
     }
 
     pub fn query(&self) -> String {

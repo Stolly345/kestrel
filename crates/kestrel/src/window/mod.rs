@@ -849,9 +849,15 @@ impl Win {
                 id.remove();
             }
             let me = w.me.clone();
-            *w.bar.debounce.borrow_mut() = Some(glib::timeout_add_local_once(std::time::Duration::from_millis(75), move || {
+            // long enough that `.pdf` typed at speed arrives whole, not as `.` first
+            *w.bar.debounce.borrow_mut() = Some(glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
                 if let Some(w) = me.upgrade() {
                     w.bar.debounce.take();
+                    // a bare `.` or `*` matches everything; wait for more (Enter still runs it)
+                    let t = w.bar.entry.text();
+                    if !t.is_empty() && t.trim_matches(|c: char| c == '.' || c == '*' || c.is_whitespace()).is_empty() {
+                        return;
+                    }
                     w.on_search_changed();
                 }
             }));
