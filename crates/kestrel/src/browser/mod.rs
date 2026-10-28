@@ -1194,8 +1194,14 @@ impl Browser {
     /// Select these names once the folder has loaded (FileManager1.ShowItems), then call `then`.
     pub fn select_when_loaded(&self, names: Vec<String>, then: impl FnOnce() + 'static) {
         *self.pending_select.borrow_mut() = Some((names, Box::new(then)));
-        // a search tab selects once its results arrive (run_search calls apply_pending_select)
-        if !self.is_searching() && !self.dirlist.is_loading() && self.dirlist.file().is_some() {
+        // a search tab selects once its results arrive (run_search calls apply_pending_select), or
+        // now if they already have: a fast search can answer before this is asked
+        let ready = if self.is_searching() {
+            matches!(*self.search_state.borrow(), SearchState::Done(_))
+        } else {
+            !self.dirlist.is_loading() && self.dirlist.file().is_some()
+        };
+        if ready {
             self.apply_pending_select();
         }
     }

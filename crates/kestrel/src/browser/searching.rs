@@ -90,7 +90,7 @@ impl Browser {
                     *b.search_state.borrow_mut() = SearchState::Done(o);
                     if o.total == 0 {
                         let hint = if b.scope.get() == Scope::Everywhere {
-                            "Try fewer words, or open the ? in the search box for syntax."
+                            "Try fewer words, or see Search Syntax in the menu."
                         } else {
                             "Nothing here. Switch the scope to Everywhere to search the whole disk."
                         };
