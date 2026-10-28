@@ -203,7 +203,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | GUI cold start | < 400 ms to an interactive search box |
 | UI responsiveness | No main-thread operation over 16 ms during typing or scrolling |
 | Security | Filenames and contents never leak across users; the daemon runs hardened (current unit); HTTP is off by default |
-| Accessibility | Every action reachable by keyboard; screen-reader labels on all icon buttons; works with GNOME large text and high contrast |
+| Accessibility | Every action reachable by keyboard; screen-reader labels on all icon buttons (command bar: met in 0.9.30, checked by a feature test); works with GNOME large text and high contrast |
+| Test reliability | `scripts/feature-test.py` and `scripts/ui-check.sh` pass on every run, under load too. A flaky test is fixed at its cause, never retried until green; a check must be able to fail (it looks at the thing under test, not at something that's always on screen) |
 | Theming | Follows system light/dark and accent colour (libadwaita) |
 
 ---
@@ -585,3 +586,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   had no name for screen readers until then). Properties left the bar for an ⓘ button at the start of each
   pane's location bar, left of the home crumb (the selection, or the folder). One row now fits from 880 sp
   (was 1500). README screenshots retaken.
+- **Feature test, music (2026-10-28, no release; 1865bae):** failed about one run in seven under load. No
+  sound server runs in the test session, so autoaudiosink could leave playback stuck at 0:00 and the first
+  song never ended. The test session now ranks GStreamer's fakeaudiosink first (keeps real time, silent).
+  Its "next / previous song" checks looked for a label with the song's name, which the file list always
+  has, so they couldn't fail; they now read the music card's title (`card_title()`). 12/12 under heavy load.
