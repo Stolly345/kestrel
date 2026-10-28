@@ -30,7 +30,10 @@ if os.environ.get("KESTREL_FT_INNER") != "1":
     home = tempfile.mkdtemp(prefix="kestrel-ft.")
     run = tempfile.mkdtemp(prefix="kestrel-ft-run.")  # outside HOME, or GIO lists its FUSE mounts as drives
     env = dict(os.environ, HOME=home, XDG_RUNTIME_DIR=run, GDK_BACKEND="x11", GDK_DEBUG="no-portals",
-               KESTREL_FT_INNER="1", KESTREL_SOCK=os.path.join(run, "kestrel.sock"), NO_AT_BRIDGE="0")
+               KESTREL_FT_INNER="1", KESTREL_SOCK=os.path.join(run, "kestrel.sock"), NO_AT_BRIDGE="0",
+               # music plays into GStreamer's fake sink: it keeps real time like a sound card, but needs
+               # no sound server (there's none in here, so playback could stall at 0:00) and stays silent
+               GST_PLUGIN_FEATURE_RANK="fakeaudiosink:MAX")
     for v in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CURRENT_DESKTOP"):
         env.pop(v, None)
     try:
@@ -991,6 +994,13 @@ def make_song(path, freq):
     return path if r.returncode == 0 and os.path.getsize(path) > 0 else None
 
 
+def card_title():
+    """The song on the preview's music card: the label after the pane's "Preview" header. (Not just
+    "a label with that name": the file list always has one.)"""
+    names = [n.get_name() for n in all_("label")]
+    return names[names.index("Preview") + 1] if "Preview" in names else None
+
+
 @test("music: MP3 and WAV play, next / previous walk the folder, repeat cycles, a song's end moves on")
 def _():
     music = os.path.join(D, "Music")
@@ -1009,14 +1019,14 @@ def _():
     time.sleep(1)
     assert app_proc.poll() is None, "Kestrel crashed while playing"
     press_button("Next song in this folder")
-    eventually(lambda: all_("label", order[1]), "the next song")
+    eventually(lambda: card_title() == order[1], "the next song")
     press_button("Previous song in this folder")
-    eventually(lambda: all_("label", order[0]), "back to the first song")
+    eventually(lambda: card_title() == order[0], "back to the first song")
     for want in ("Repeat: this folder", "Repeat: this song", "Repeat: off"):
         press_button(None, contains="Repeat:")
         eventually(lambda: all_("button", want), want)
     if not extra:  # the first song ends and the next (the WAV) starts by itself and plays
-        eventually(lambda: all_("label", order[1]), "the next song after the first ended", timeout=10)
+        eventually(lambda: card_title() == order[1], "the next song after the first ended", timeout=10)
         eventually(lambda: all_("button", "Pause") and any("0:0" in (n.get_name() or "") and " / " in (n.get_name() or "") for n in all_("label")), "the WAV playing")
         assert not all_(contains="Can't play this"), "the WAV didn't play"
     assert app_proc.poll() is None, "Kestrel crashed"
