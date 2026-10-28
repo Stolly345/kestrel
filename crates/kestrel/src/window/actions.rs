@@ -136,6 +136,7 @@ impl Win {
             None => w.ops.toast("Open a folder first"),
         });
         self.act("undo", |w| w.ops.undo());
+        self.act("redo", |w| w.ops.redo());
         self.act("copy-path", |w| {
             let files = w.sel();
             let files = if files.is_empty() {

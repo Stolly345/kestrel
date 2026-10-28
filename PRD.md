@@ -531,3 +531,10 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   None / Invert show while it's on. The checkbox claims the press, or the row would replace the selection.
   Columns view has none. Tabs 46 → 34 px and the location bar 34 → 28 px by padding only (text size unchanged).
   Extract's split button follows the action's enabled state (an AdwSplitButton never goes insensitive itself).
+- **v0.9.26 (2026-10-28): one-row command bar when there's room, Redo.** Order (Alex's): New, Open, Select |
+  Undo, Redo | Pin, Cut, Copy, Paste ‖ Rename, Properties | Compress, Extract | Delete | View. One row from
+  1500 sp of bar width (an AdwBreakpointBin flips the box, so the sidebar and preview pane count), otherwise
+  two rows split at ‖. Redo (Ctrl+Shift+Z, Ctrl+Y, toolbar): undoing a step hands back its opposite
+  (run_undo), which goes on the redo stack; a new action clears it. Copied undo steps now keep their sources
+  so a copy can be redone. Search help moved to the far side of the scope dropdown. `kestrel --width N` and
+  ui-check's SCREEN= for wide screenshots.

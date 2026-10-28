@@ -16,10 +16,15 @@ pub enum Op {
     Move,
 }
 
+/// One undoable step. Running it (run_undo) also hands back its opposite, which is how Redo works.
 pub enum Undo {
     Moved(Vec<(gio::File, gio::File)>),
-    Copied(Vec<gio::File>),
+    /// (source, copy) pairs: undo deletes the copies, the opposite copies again
+    Copied(Vec<(gio::File, gio::File)>),
+    Recopy(Vec<(gio::File, gio::File)>),
+    /// original paths of items now in the trash: undo restores them, the opposite (Retrash) trashes them again
     Trashed(Vec<PathBuf>),
+    Retrash(Vec<PathBuf>),
     Renamed(gio::File, gio::File),
     Created(gio::File),
     /// Several steps, undone in order (a replace: undo the transfer, then restore what it replaced).
@@ -371,9 +376,10 @@ fn restore_from_trash(origs: &[PathBuf]) -> Result<(), String> {
     }
 }
 
-fn run_undo(u: Undo) -> Result<String, String> {
+/// Undo a step: what to say, and the step that would do it again (None if that can't be).
+fn run_undo(u: Undo, p: &Progress) -> Result<(String, Option<Undo>), String> {
     let err = |e: glib::Error| crate::browser::human_gio(&e);
-    match u {
+    Ok(match u {
         Undo::Moved(pairs) => {
             for (src, dst) in pairs.iter().rev() {
                 dst.move_(
@@ -384,34 +390,52 @@ fn run_undo(u: Undo) -> Result<String, String> {
                 )
                 .map_err(err)?;
             }
-            Ok("Move undone".into())
+            ("Move undone".into(), Some(Undo::Moved(pairs.into_iter().map(|(s, d)| (d, s)).collect())))
         }
         // the originals still exist, so copies are deleted outright; trashing them would also
         // shadow a replaced original with the same path in the trash
-        Undo::Copied(dsts) => {
-            for d in dsts {
-                delete_tree(&d).map_err(err)?;
+        Undo::Copied(pairs) => {
+            for (_, d) in &pairs {
+                delete_tree(d).map_err(err)?;
             }
-            Ok("Copy undone".into())
+            ("Copy undone".into(), Some(Undo::Recopy(pairs)))
+        }
+        Undo::Recopy(pairs) => {
+            for (s, d) in &pairs {
+                copy_tree(s, d, p).map_err(err)?;
+            }
+            ("Copied again".into(), Some(Undo::Copied(pairs)))
         }
         Undo::Created(f) => {
             f.trash(gio::Cancellable::NONE).map_err(err)?;
-            Ok("Moved to trash".into())
+            ("Moved to trash".into(), f.path().map(|p| Undo::Trashed(vec![p])))
         }
         Undo::Renamed(old, new) => {
             new.move_(&old, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None)
                 .map_err(err)?;
-            Ok("Rename undone".into())
+            ("Rename undone".into(), Some(Undo::Renamed(new, old)))
         }
-        Undo::Trashed(origs) => restore_from_trash(&origs).map(|_| "Restored from trash".into()),
-        Undo::Many(steps) => {
-            let mut last = String::new();
-            for u in steps {
-                last = run_undo(u)?;
+        Undo::Trashed(origs) => {
+            restore_from_trash(&origs)?;
+            ("Restored from trash".into(), Some(Undo::Retrash(origs)))
+        }
+        Undo::Retrash(origs) => {
+            for o in &origs {
+                gio::File::for_path(o).trash(gio::Cancellable::NONE).map_err(err)?;
             }
-            Ok(last)
+            ("Moved to trash again".into(), Some(Undo::Trashed(origs)))
         }
-    }
+        Undo::Many(steps) => {
+            let (mut last, mut back) = (String::new(), Vec::new());
+            for u in steps {
+                let (msg, opp) = run_undo(u, p)?;
+                last = msg;
+                back.extend(opp);
+            }
+            back.reverse();
+            (last, Some(Undo::Many(back)))
+        }
+    })
 }
 
 pub struct Ops {
@@ -424,6 +448,7 @@ pub struct Ops {
     detail: gtk::Label,
     cancel: gtk::Button,
     undo: RefCell<Vec<Undo>>,
+    redo: RefCell<Vec<Undo>>,
 }
 
 /// The archive unpacked in a hidden staging folder `tmp`: `src` still has to land in the
@@ -489,6 +514,7 @@ impl Ops {
             detail,
             cancel,
             undo: RefCell::default(),
+            redo: RefCell::default(),
         })
     }
 
@@ -496,8 +522,14 @@ impl Ops {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
 
+    /// A new undoable action; it ends what Redo could repeat.
+    pub(crate) fn record(&self, u: Undo) {
+        self.undo.borrow_mut().push(u);
+        self.redo.borrow_mut().clear();
+    }
+
     pub(crate) fn toast_undo(&self, msg: &str, undo: Undo) {
-        self.undo.borrow_mut().push(undo);
+        self.record(undo);
         self.toasts
             .add_toast(adw::Toast::builder().title(msg).button_label("Undo").action_name("win.undo").build());
     }
@@ -642,7 +674,7 @@ impl Ops {
                         msg += &format!(", replaced {}", replaced.len());
                     }
                     let main = if op == Op::Copy {
-                        Undo::Copied(pairs.into_iter().map(|(_, d)| d).collect())
+                        Undo::Copied(pairs)
                     } else {
                         Undo::Moved(pairs)
                     };
@@ -715,7 +747,7 @@ impl Ops {
                 Ok(done) => me.toast_undo(&format!("{} moved to trash", plural(done.len(), "item")), Undo::Trashed(done)),
                 Err((done, e)) => {
                     if !done.is_empty() {
-                        me.undo.borrow_mut().push(Undo::Trashed(done));
+                        me.record(Undo::Trashed(done));
                     }
                     me.toast(&format!("Couldn't trash: {e}"));
                 }
@@ -879,7 +911,7 @@ impl Ops {
                     .map_err(|e| crate::browser::human_gio(&e))
             },
             |me, r| match r {
-                Ok((old, new)) => me.undo.borrow_mut().push(Undo::Renamed(old, new)),
+                Ok((old, new)) => me.record(Undo::Renamed(old, new)),
                 Err(e) => me.toast(&e),
             },
         );
@@ -892,7 +924,7 @@ impl Ops {
             me.bg(
                 move || f.make_directory(gio::Cancellable::NONE).map(|_| f).map_err(|e| crate::browser::human_gio(&e)),
                 |me, r| match r {
-                    Ok(f) => me.undo.borrow_mut().push(Undo::Created(f)),
+                    Ok(f) => me.record(Undo::Created(f)),
                     Err(e) => me.toast(&e),
                 },
             );
@@ -906,7 +938,7 @@ impl Ops {
             me.bg(
                 move || f.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE).map(|_| f).map_err(|e| crate::browser::human_gio(&e)),
                 |me, r| match r {
-                    Ok(f) => me.undo.borrow_mut().push(Undo::Created(f)),
+                    Ok(f) => me.record(Undo::Created(f)),
                     Err(e) => me.toast(&e),
                 },
             );
@@ -935,7 +967,7 @@ impl Ops {
                     me.toast(&format!("{} linked", plural(made.len(), "item")));
                 }
                 if !made.is_empty() {
-                    me.undo.borrow_mut().push(Undo::Many(made));
+                    me.record(Undo::Many(made));
                 }
             },
         );
@@ -1130,15 +1162,33 @@ impl Ops {
     }
 
     pub fn undo(self: &Rc<Self>) {
-        let Some(u) = self.undo.borrow_mut().pop() else {
-            self.toast("Nothing to undo");
+        self.step(true);
+    }
+
+    pub fn redo(self: &Rc<Self>) {
+        self.step(false);
+    }
+
+    /// Undo (or redo) the latest step; its opposite goes on the other stack.
+    fn step(self: &Rc<Self>, undo: bool) {
+        let (from, word) = if undo { (&self.undo, "undo") } else { (&self.redo, "redo") };
+        let Some(u) = from.borrow_mut().pop() else {
+            self.toast(&format!("Nothing to {word}"));
             return;
         };
         // gio::File is thread-safe; the closure only moves Files/PathBufs
         self.job(
-            "Undoing".to_string(),
-            move |_| run_undo(u),
-            |me, r| me.toast(&r.unwrap_or_else(|e| format!("Undo failed: {e}"))),
+            if undo { "Undoing" } else { "Redoing" }.to_string(),
+            move |p| run_undo(u, p),
+            move |me, r| match r {
+                Ok((msg, opp)) => {
+                    if let Some(o) = opp {
+                        if undo { &me.redo } else { &me.undo }.borrow_mut().push(o);
+                    }
+                    me.toast(&msg);
+                }
+                Err(e) => me.toast(&format!("{} failed: {e}", if undo { "Undo" } else { "Redo" })),
+            },
         );
     }
 
@@ -1272,12 +1322,18 @@ mod tests {
         assert_eq!((t.pairs.len(), t.failed.len()), (1, 1), "{:?}", t.failed);
         assert!(t.failed[0].starts_with("missing:"));
         delete_tree(&t.pairs[0].1).unwrap();
-        run_undo(Undo::Moved(pairs)).unwrap();
+        let (_, redo) = run_undo(Undo::Moved(pairs), &p).unwrap();
         assert!(exists(&src.child("sub/b.txt")) && !exists(&dst.child("sub")), "undo moves it back");
+        let (_, undo) = run_undo(redo.unwrap(), &p).unwrap();
+        assert!(exists(&dst.child("sub/b.txt")) && !exists(&src.child("sub")), "redo moves it again");
+        run_undo(undo.unwrap(), &p).unwrap();
+        assert!(exists(&src.child("sub/b.txt")), "and undo again");
 
         let renamed = src.child("a.txt").set_display_name("z.txt", gio::Cancellable::NONE).unwrap();
-        run_undo(Undo::Renamed(src.child("a.txt"), renamed)).unwrap();
+        let (_, redo) = run_undo(Undo::Renamed(src.child("a.txt"), renamed), &p).unwrap();
         assert!(exists(&src.child("a.txt")));
+        run_undo(redo.unwrap(), &p).unwrap();
+        assert!(exists(&src.child("z.txt")) && !exists(&src.child("a.txt")), "redo renames again");
         delete_tree(&d).unwrap();
     }
 
@@ -1324,13 +1380,14 @@ mod tests {
         assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "new");
         assert_eq!(t.replaced, [base.join("dst/a.txt")]);
         // undo: copy removed, the replaced original back from the trash
-        run_undo(Undo::Many(vec![
-            Undo::Copied(t.pairs.into_iter().map(|(_, d)| d).collect()),
-            Undo::Trashed(t.replaced),
-        ]))
-        .unwrap();
+        let (_, redo) = run_undo(Undo::Many(vec![Undo::Copied(t.pairs), Undo::Trashed(t.replaced)]), &p).unwrap();
         assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "old");
         assert_eq!(std::fs::read_to_string(base.join("src/a.txt")).unwrap(), "new", "source untouched");
+        // redo: the original back to the trash, the copy made again
+        let (_, undo) = run_undo(redo.unwrap(), &p).unwrap();
+        assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "new");
+        run_undo(undo.unwrap(), &p).unwrap();
+        assert_eq!(std::fs::read_to_string(base.join("dst/a.txt")).unwrap(), "old", "undo after redo");
         std::fs::remove_dir_all(&base).unwrap();
     }
 

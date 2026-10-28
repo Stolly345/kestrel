@@ -50,6 +50,11 @@ pub fn load_session() -> Option<Session> {
     serde_json::from_str(&std::fs::read_to_string(session_file()).ok()?).ok()
 }
 
+/// Command-bar width (sp) from which it fits on one row; narrower, it takes two. The rows measure
+/// 870 + 613 px with every label (Extract and the Select buttons only add while shown, and scroll if
+/// they don't fit): a maximised 1920 px window with the sidebar open gives the bar ~1640.
+const ONE_ROW_WIDTH: u32 = 1500;
+
 pub struct Pane {
     pub root: gtk::Box,
     pub view: adw::TabView,
@@ -262,7 +267,6 @@ impl Win {
             .build();
         let row = gtk::Box::builder().spacing(6).hexpand(true).css_classes(["search-row"]).build();
         row.append(&entry);
-        row.append(&help);
         let history = gtk::Popover::builder().autohide(false).has_arrow(false).halign(gtk::Align::Start).build();
         history.set_parent(&entry);
         let (scope_w, help_w) = (scope.clone(), help.clone());
@@ -403,6 +407,8 @@ impl Win {
         v.append(Some("Show Hidden Files"), Some("win.show-hidden"));
         view_menu.append_section(None, &v);
         ends.prepend(&scope_w);
+        // search help sits on the far side of "what to search"
+        ends.insert_child_after(&help_w, Some(&scope_w));
 
         // command bar, after Windows Explorer's Home ribbon, in two rows:
         //   New | Pin, Cut, Copy, Paste | Delete, Rename, Undo
@@ -446,51 +452,6 @@ impl Win {
 
         let r = &rows[0];
         r.append(&menu_btn("list-add-symbolic", "New", &menu(&[("Folder…", "win.new-folder"), ("Empty File…", "win.new-file")])));
-        r.append(&sep());
-        r.append(&button("view-pin-symbolic", "Pin", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)"));
-        r.append(&button("edit-cut-symbolic", "Cut", "win.cut", "Cut (Ctrl+X)"));
-        r.append(&split_btn("edit-copy-symbolic", "Copy", "win.copy", "Copy (Ctrl+C)", &menu(&[("Copy", "win.copy"), ("Copy Path", "win.copy-path")])));
-        r.append(&split_btn(
-            "edit-paste-symbolic",
-            "Paste",
-            "win.paste",
-            "Paste (Ctrl+V)",
-            &menu(&[("Paste", "win.paste"), ("Paste as Link", "win.paste-link")]),
-        ));
-        r.append(&sep());
-        r.append(&split_btn(
-            "user-trash-symbolic",
-            "Delete",
-            "win.trash",
-            "Move to Trash (Delete)",
-            &menu(&[("Move to Trash", "win.trash"), ("Delete Permanently", "win.delete")]),
-        ));
-        r.append(&button("document-edit-symbolic", "Rename", "win.rename", "Rename (F2)"));
-        r.append(&button("edit-undo-symbolic", "Undo", "win.undo", "Undo (Ctrl+Z)"));
-
-        let r = &rows[1];
-        // Archive: Compress always; Extract while an archive is selected (Explorer's Extract tab)
-        r.append(&button("package-x-generic-symbolic", "Compress", "win.compress", "Compress into a zip, 7z or tar…"));
-        let extract = split_btn(
-            "folder-download-symbolic",
-            "Extract",
-            "win.extract",
-            "Extract Here",
-            &menu(&[("Extract Here", "win.extract"), ("Extract To…", "win.extract-to"), ("Browse Archive", "win.browse-archive")]),
-        );
-        // a split button stays sensitive itself (only its inner button greys), so follow the action
-        let e = extract.clone();
-        window.connect_action_enabled_changed(Some("extract"), move |_, _, on| e.set_visible(on));
-        r.append(&extract);
-        for (icon, label, action) in [
-            ("edit-undo-symbolic", "Restore", "win.restore"),
-            ("user-trash-full-symbolic", "Empty Trash…", "win.empty-trash"),
-        ] {
-            let b = gtk::Button::builder().child(&labelled(icon, label)).action_name(action).build();
-            contextual(b.upcast_ref());
-            r.append(&b);
-        }
-        r.append(&sep());
         r.append(&menu_btn(
             "document-open-symbolic",
             "Open",
@@ -501,8 +462,6 @@ impl Win {
                 ("Open in Terminal", "win.terminal"),
             ]),
         ));
-        r.append(&button("help-about-symbolic", "Properties", "win.properties", "Properties (Alt+Enter)"));
-        r.append(&sep());
         // Select: checkboxes on every item; All / None / Invert while it's on
         let select = gtk::ToggleButton::builder()
             .child(&labelled("selection-mode-symbolic", "Select"))
@@ -520,17 +479,76 @@ impl Win {
             r.append(&b);
         }
         r.append(&sep());
+        r.append(&button("edit-undo-symbolic", "Undo", "win.undo", "Undo (Ctrl+Z)"));
+        r.append(&button("edit-redo-symbolic", "Redo", "win.redo", "Redo (Ctrl+Shift+Z)"));
+        r.append(&sep());
+        r.append(&button("view-pin-symbolic", "Pin", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)"));
+        r.append(&button("edit-cut-symbolic", "Cut", "win.cut", "Cut (Ctrl+X)"));
+        r.append(&split_btn("edit-copy-symbolic", "Copy", "win.copy", "Copy (Ctrl+C)", &menu(&[("Copy", "win.copy"), ("Copy Path", "win.copy-path")])));
+        r.append(&split_btn(
+            "edit-paste-symbolic",
+            "Paste",
+            "win.paste",
+            "Paste (Ctrl+V)",
+            &menu(&[("Paste", "win.paste"), ("Paste as Link", "win.paste-link")]),
+        ));
+
+        let r = &rows[1];
+        r.append(&button("document-edit-symbolic", "Rename", "win.rename", "Rename (F2)"));
+        r.append(&button("help-about-symbolic", "Properties", "win.properties", "Properties (Alt+Enter)"));
+        r.append(&sep());
+        // Archive: Compress always; Extract while an archive is selected (Explorer's Extract tab)
+        r.append(&button("package-x-generic-symbolic", "Compress", "win.compress", "Compress into a zip, 7z or tar…"));
+        let extract = split_btn(
+            "folder-download-symbolic",
+            "Extract",
+            "win.extract",
+            "Extract Here",
+            &menu(&[("Extract Here", "win.extract"), ("Extract To…", "win.extract-to"), ("Browse Archive", "win.browse-archive")]),
+        );
+        // a split button stays sensitive itself (only its inner button greys), so follow the action
+        let e = extract.clone();
+        window.connect_action_enabled_changed(Some("extract"), move |_, _, on| e.set_visible(on));
+        r.append(&extract);
+        r.append(&sep());
+        // destructive, so on its own
+        r.append(&split_btn(
+            "user-trash-symbolic",
+            "Delete",
+            "win.trash",
+            "Move to Trash (Delete)",
+            &menu(&[("Move to Trash", "win.trash"), ("Delete Permanently", "win.delete")]),
+        ));
+        for (icon, label, action) in [
+            ("edit-undo-symbolic", "Restore", "win.restore"),
+            ("user-trash-full-symbolic", "Empty Trash…", "win.empty-trash"),
+        ] {
+            let b = gtk::Button::builder().child(&labelled(icon, label)).action_name(action).build();
+            contextual(b.upcast_ref());
+            r.append(&b);
+        }
+        r.append(&sep());
         r.append(&menu_btn("view-grid-symbolic", "View", &view_menu));
 
+        // one row when there's room (a maximised window), else two. The bin measures its own width,
+        // so the sidebar and preview pane count too.
         let cmd = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["command-bar"]).build();
-        rows.iter().for_each(|r| cmd.append(r));
+        let row_sep = gtk::Separator::builder().orientation(gtk::Orientation::Vertical).visible(false).build();
+        cmd.append(&rows[0]);
+        cmd.append(&row_sep);
+        cmd.append(&rows[1]);
         // too wide for a small window: scrolls sideways (touchpad, wheel) instead of widening the window
-        let cmd_bar = gtk::ScrolledWindow::builder()
+        let cmd_scroll = gtk::ScrolledWindow::builder()
             .child(&cmd)
             .hscrollbar_policy(gtk::PolicyType::External)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
             .build();
+        let cmd_bar = adw::BreakpointBin::builder().width_request(1).height_request(1).child(&cmd_scroll).build();
+        let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("min-width: {ONE_ROW_WIDTH}sp")).unwrap());
+        bp.add_setter(&cmd, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
+        bp.add_setter(&row_sep, "visible", Some(&true.to_value()));
+        cmd_bar.add_breakpoint(bp);
         hrow.append(&row);
         hrow.append(&ends);
 
@@ -932,6 +950,8 @@ impl Win {
             ("<Control>x", "win.cut"),
             ("<Control>v", "win.paste"),
             ("<Control>z", "win.undo"),
+            ("<Control><Shift>z", "win.redo"),
+            ("<Control>y", "win.redo"),
             ("<Control>a", "win.select-all"),
             ("<Control><Shift>a", "win.select-none"),
             ("<Control><Shift>i", "win.invert-selection"),

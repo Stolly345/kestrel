@@ -29,9 +29,8 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 const CSS: &str = "
-.command-bar > .toolbar { padding: 2px 6px; }
-.command-bar > .toolbar:first-child { padding-top: 4px; }
-.command-bar > .toolbar:last-child { padding-bottom: 4px; }
+.command-bar { padding: 2px 0; }
+.command-bar > .toolbar { padding: 1px 6px; }
 .command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
 .command-bar separator { margin: 5px 3px; }
 /* compact tabs: less padding only, the font stays the size it was, so names never clip */
@@ -111,6 +110,8 @@ struct Args {
     hidden: bool,
     actions: Vec<String>,
     select: Vec<String>,
+    /// window width (screenshots of wide layouts)
+    width: Option<i32>,
     /// D-Bus activated as org.freedesktop.FileManager1: no window of our own, windows on request.
     filemanager1: bool,
 }
@@ -131,6 +132,7 @@ fn parse_args() -> Args {
             "--mode" => a.mode = it.next().map(|m| Mode::parse(&m)),
             "--action" => a.actions.extend(it.next()),
             "--select" => a.select.extend(it.next()),
+            "--width" => a.width = it.next().and_then(|w| w.parse().ok()),
             "--filemanager1" => a.filemanager1 = true,
             "-h" | "--help" => {
                 println!("usage: kestrel [PATH|URI]...");
@@ -245,6 +247,9 @@ fn main() -> glib::ExitCode {
         if let (Some(m), Some(b)) = (mode, w.current()) {
             b.set_mode(m);
             w.update();
+        }
+        if let Some(width) = args.width {
+            w.window.set_default_size(width, w.window.default_height());
         }
         w.window.present();
         w.focus_search(None);

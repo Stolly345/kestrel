@@ -38,6 +38,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Move to trash", "win.trash", None),
     ("Delete permanently…", "win.delete", None),
     ("Undo", "win.undo", None),
+    ("Redo", "win.redo", None),
     ("Restore from trash", "win.restore", None),
     ("Empty trash…", "win.empty-trash", None),
     ("New folder…", "win.new-folder", None),

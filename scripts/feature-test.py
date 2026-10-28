@@ -604,7 +604,7 @@ def _():
     eventually(lambda: os.path.exists(os.path.join(TRASH, "notes.md")), "the old one in the trash")
 
 
-@test("files: rename (F2) and undo (Ctrl+Z)")
+@test("files: rename (F2), undo (Ctrl+Z), redo (Ctrl+Shift+Z / the Redo button)")
 def _():
     start(D)
     select("IMG_0001.txt"); key("F2")
@@ -614,6 +614,11 @@ def _():
     eventually(lambda: exists("holiday photo.txt") and not exists("IMG_0001.txt"), "renamed on disk")
     key("Control_L", "z")
     eventually(lambda: exists("IMG_0001.txt") and not exists("holiday photo.txt"), "undone")
+    key("Control_L", "Shift_L", "z")
+    eventually(lambda: exists("holiday photo.txt") and not exists("IMG_0001.txt"), "redone")
+    key("Control_L", "z"); eventually(lambda: exists("IMG_0001.txt"), "undone again")
+    press_button("Redo")
+    eventually(lambda: exists("holiday photo.txt"), "redone from the command bar")
 
 
 @test("files: new folder (Ctrl+Shift+N)")

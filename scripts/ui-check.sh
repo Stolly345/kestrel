@@ -81,7 +81,7 @@ shot() {
     local log=$out/$name.log
     # stdin from /dev/null: timeout runs this in a background process group, and xvfb-run's stty
     # on the terminal would otherwise stop the whole run (SIGTTOU)
-    timeout 60 xvfb-run -a -s "-screen 0 1440x900x24" dbus-run-session -- \
+    timeout 60 xvfb-run -a -s "-screen 0 ${SCREEN:-1440x900}x24" dbus-run-session -- \
         "$bin" "$@" --screenshot "$out/$name.png" --delay "${DELAY:-3000}" >"$log" 2>&1 </dev/null
     local rc=$?
     local why=
@@ -109,6 +109,7 @@ expect() {
 
 shot details "$D"
 shot command-bar-archive "$D" --select sample.zip
+SCREEN=1920x1080 shot command-bar-one-row "$D" --width 1920 --select sample.zip
 shot tabs-preview "$D" "$D/Projects" --action preview
 shot select-mode "$D" --action select-mode --select notes.md --select report.pdf
 shot select-mode-grid "$D" --mode grid --action select-mode --select notes.md
