@@ -72,9 +72,37 @@ impl Win {
         });
         self.act("copy", |w| w.ops.set_clipboard(&w.sel(), false));
         self.act("cut", |w| w.ops.set_clipboard(&w.sel(), true));
-        self.act("paste", |w| match w.current().and_then(|b| b.dir()) {
-            Some(d) => w.ops.paste(d),
-            None => w.ops.toast("Open a folder to paste into"),
+        for (name, link) in [("paste", false), ("paste-link", true)] {
+            self.act(name, move |w| match w.current().and_then(|b| b.dir()) {
+                Some(d) => w.ops.paste(d, link),
+                None => w.ops.toast("Open a folder to paste into"),
+            });
+        }
+        // Explorer's "Move to" / "Copy to": pick any folder
+        for (name, op, title) in [("copy-to", Op::Copy, "Copy To"), ("move-to", Op::Move, "Move To")] {
+            self.act(name, move |w| {
+                let files = w.sel();
+                let fd = gtk::FileDialog::builder().title(title).accept_label(title).modal(true).build();
+                if let Some(d) = w.current().and_then(|b| b.dir()) {
+                    fd.set_initial_folder(Some(&d));
+                }
+                let ops = w.ops.clone();
+                fd.select_folder(Some(&w.window), gio::Cancellable::NONE, move |r| {
+                    if let Ok(dest) = r {
+                        ops.transfer(op, files.clone(), dest);
+                    }
+                });
+            });
+        }
+        self.act("select-all", |w| w.current().into_iter().for_each(|b| _ = b.sel().select_all()));
+        self.act("select-none", |w| w.current().into_iter().for_each(|b| _ = b.sel().unselect_all()));
+        self.act("invert-selection", |w| {
+            let Some(b) = w.current() else { return };
+            let s = b.sel();
+            let all = gtk::Bitset::new_range(0, s.n_items());
+            let flipped = all.copy();
+            flipped.subtract(&s.selection());
+            s.set_selection(&flipped, &all);
         });
         for (name, op) in [("copy-other", Op::Copy), ("move-other", Op::Move)] {
             self.act(name, move |w| match w.other().and_then(|o| o.dir()) {
@@ -101,6 +129,10 @@ impl Win {
         self.act("delete", |w| w.ops.delete(w.sel()));
         self.act("new-folder", |w| match w.current().and_then(|b| b.dir()) {
             Some(d) => w.ops.new_folder(d),
+            None => w.ops.toast("Open a folder first"),
+        });
+        self.act("new-file", |w| match w.current().and_then(|b| b.dir()) {
+            Some(d) => w.ops.new_file(d),
             None => w.ops.toast("Open a folder first"),
         });
         self.act("undo", |w| w.ops.undo());

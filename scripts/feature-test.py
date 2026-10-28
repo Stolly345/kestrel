@@ -625,6 +625,40 @@ def _():
     eventually(lambda: "Fresh" in names(), "the folder listed")
 
 
+def palette(cmd):
+    key("Control_L", "Shift_L", "p")
+    e = wait(lambda: [x for x in all_("text") + all_("entry") if (x.get_name() or "") != "Search files"][0], "the palette field")
+    set_text(e, cmd); key("Return")
+
+
+@test("files: New > Empty File from the command bar")
+def _():
+    start(D)
+    press_button("New"); pick("Empty File…")
+    e = wait(lambda: [x for x in all_("text") + all_("entry") if text_of(x) == "New Document.txt"][0], "the name field")
+    set_text(e, "fresh.txt"); key("Return")
+    eventually(lambda: os.path.isfile(os.path.join(D, "fresh.txt")), "the file on disk")
+
+
+@test("files: Paste as Link makes a symlink")
+def _():
+    start(D)
+    select("notes.md"); key("Control_L", "c")
+    palette("paste as link")
+    p = os.path.join(D, "notes (2).md")
+    eventually(lambda: os.path.islink(p) and os.readlink(p) == os.path.join(D, "notes.md"), "a link to notes.md")
+
+
+@test("files: select all, invert, none (Ctrl+A, Ctrl+Shift+I, Ctrl+Shift+A)")
+def _():
+    start(D)
+    select("notes.md")
+    key("Control_L", "a"); eventually(lambda: "all" in status() or f"{len(names())} selected" in status(), "all selected")
+    select("notes.md"); key("Control_L", "Shift_L", "i")
+    eventually(lambda: f"{len(names()) - 1} selected" in status(), "all but one selected")
+    key("Control_L", "Shift_L", "a"); eventually(lambda: "selected" not in status(), "none selected")
+
+
 @test("files: Delete moves to the trash, Ctrl+Z brings it back")
 def _():
     start(D)

@@ -396,7 +396,7 @@ fn run_undo(u: Undo) -> Result<String, String> {
         }
         Undo::Created(f) => {
             f.trash(gio::Cancellable::NONE).map_err(err)?;
-            Ok("Folder moved to trash".into())
+            Ok("Moved to trash".into())
         }
         Undo::Renamed(old, new) => {
             new.move_(&old, gio::FileCopyFlags::NOFOLLOW_SYMLINKS, gio::Cancellable::NONE, None)
@@ -899,6 +899,48 @@ impl Ops {
         });
     }
 
+    pub fn new_file(self: &Rc<Self>, dir: gio::File) {
+        let me = self.clone();
+        self.ask_name("New File", "Create", "New Document.txt", move |name| {
+            let f = dir.child(&name);
+            me.bg(
+                move || f.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE).map(|_| f).map_err(|e| crate::browser::human_gio(&e)),
+                |me, r| match r {
+                    Ok(f) => me.undo.borrow_mut().push(Undo::Created(f)),
+                    Err(e) => me.toast(&e),
+                },
+            );
+        });
+    }
+
+    /// Symlinks to `srcs` in `dest` (Explorer's "Paste shortcut"); a taken name gets " (2)".
+    pub fn link(self: &Rc<Self>, srcs: Vec<gio::File>, dest: gio::File) {
+        self.bg(
+            move || {
+                let (mut made, mut failed) = (Vec::new(), Vec::new());
+                for s in &srcs {
+                    let (Some(name), Some(target)) = (s.basename(), s.path()) else { continue };
+                    let l = unique_child(&dest, &name.to_string_lossy());
+                    match l.make_symbolic_link(&target, gio::Cancellable::NONE) {
+                        Ok(()) => made.push(Undo::Created(l)),
+                        Err(e) => failed.push(crate::browser::human_gio(&e)),
+                    }
+                }
+                (made, failed)
+            },
+            |me, (made, failed)| {
+                if let Some(e) = failed.first() {
+                    me.toast(e);
+                } else {
+                    me.toast(&format!("{} linked", plural(made.len(), "item")));
+                }
+                if !made.is_empty() {
+                    me.undo.borrow_mut().push(Undo::Many(made));
+                }
+            },
+        );
+    }
+
     /// Zip/7z via 7z, tarballs via tar (format from the name's extension).
     pub fn compress(self: &Rc<Self>, files: Vec<gio::File>, dir: gio::File, name: String) {
         let names: Option<Vec<String>> = files.iter().map(|f| f.basename().map(|b| b.to_string_lossy().into_owned())).collect();
@@ -1120,7 +1162,8 @@ impl Ops {
         self.toast(&format!("{} {}", plural(files.len(), "item"), if cut { "cut" } else { "copied" }));
     }
 
-    pub fn paste(self: &Rc<Self>, dest: gio::File) {
+    /// Paste the clipboard's files into `dest`; `link` makes symlinks to them instead.
+    pub fn paste(self: &Rc<Self>, dest: gio::File, link: bool) {
         let Some(display) = gdk::Display::default() else { return };
         let cb = display.clipboard();
         let me = self.clone();
@@ -1156,7 +1199,11 @@ impl Ops {
                 _ => Op::Copy,
             };
             let files: Vec<gio::File> = lines.map(gio::File::for_uri).collect();
-            me.transfer(op, files, dest);
+            if link {
+                me.link(files, dest);
+            } else {
+                me.transfer(op, files, dest);
+            }
         });
     }
 }

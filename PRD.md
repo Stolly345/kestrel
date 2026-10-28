@@ -515,3 +515,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   twice (sidebar header + the content header's own WindowControls); the content header's start controls now
   show only while the sidebar is hidden. ui-check.sh uses such a layout so it stays caught. Not done: Sort menu
   (column headers sort), Share (no GNOME file-share), New → file, Select all/none/invert.
+- **v0.9.24 (2026-10-28): the command bar does what Explorer's Home ribbon does.** Pin to sidebar; Copy ▾ (Copy
+  Path); Paste ▾ (Paste as Link: symlinks, numbered on a clash, undoable — Explorer's "Paste shortcut"); Move to ▾
+  / Copy to ▾ (Other Pane, Choose Folder…); Delete ▾ (Move to Trash, Delete Permanently); Rename; New ▾ (Folder,
+  Empty File, also in the background menu); Archive group: Compress, Extract split button (Here / To… / Browse
+  Archive) shown while an archive is selected; Open ▾ (Open, Open With, New Tab, Terminal); Properties; Select ▾
+  (all Ctrl+A, none Ctrl+Shift+A, invert Ctrl+Shift+I). All new actions are in the palette. Icons with tooltips
+  (Windows 11 style): with labels the bar needs ~1450 px; as icons ~1040 px, so the default window is now 1280
+  wide and a narrower one scrolls the bar sideways. Not done: Easy access, Edit, History (Windows-only ideas).

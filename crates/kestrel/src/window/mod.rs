@@ -160,6 +160,7 @@ fn menus() -> (gio::Menu, gio::Menu) {
     let bg = gio::Menu::new();
     let s = gio::Menu::new();
     s.append(Some("New Folder…"), Some("win.new-folder"));
+    s.append(Some("New File…"), Some("win.new-file"));
     s.append(Some("Paste"), Some("win.paste"));
     s.append(Some("Empty Trash…"), Some("win.empty-trash"));
     bg.append_section(None, &s);
@@ -191,7 +192,7 @@ impl Win {
     fn build(app: &adw::Application, me: Weak<Win>) -> Win {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .default_width(1200)
+            .default_width(1280)
             .default_height(760)
             .title("Kestrel")
             .build();
@@ -402,32 +403,97 @@ impl Win {
         view_menu.append_section(None, &v);
         ends.prepend(&scope_w);
 
-        // command bar, like Windows 11 Explorer's: New | clipboard, rename, delete | View | ⋯.
-        // Buttons follow their actions, so update_actions greys them out to suit the selection.
+        // command bar, after Windows Explorer's Home ribbon: New | Pin | Clipboard | Organize | Archive |
+        // Open | Select | View | ⋯. Buttons follow their actions, so update_actions greys them out to suit
+        // the selection.
         let cmd = gtk::Box::builder().spacing(2).css_classes(["toolbar", "command-bar"]).build();
+        let menu = |items: &[(&str, &str)]| {
+            let m = gio::Menu::new();
+            for (label, action) in items {
+                m.append(Some(label), Some(action));
+            }
+            m
+        };
+        // like Windows 11's bar: icons with tooltips, words only on New and the contextual buttons
         let labelled = |icon: &str, label: &str| adw::ButtonContent::builder().icon_name(icon).label(label).build();
-        let new_menu = gio::Menu::new();
-        new_menu.append(Some("Folder"), Some("win.new-folder"));
-        cmd.append(
-            &gtk::MenuButton::builder()
-                .child(&labelled("list-add-symbolic", "New"))
-                .menu_model(&new_menu)
-                .tooltip_text("New")
-                .build(),
-        );
-        cmd.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-        for (icon, action, tip) in [
-            ("edit-cut-symbolic", "win.cut", "Cut (Ctrl+X)"),
-            ("edit-copy-symbolic", "win.copy", "Copy (Ctrl+C)"),
-            ("edit-paste-symbolic", "win.paste", "Paste (Ctrl+V)"),
-            ("document-edit-symbolic", "win.rename", "Rename (F2)"),
-            ("user-trash-symbolic", "win.trash", "Move to Trash (Delete)"),
-        ] {
-            cmd.append(&btn(icon, action, tip));
-        }
-        // contextual, as Explorer shows "Extract all" only for archives: shown only while they apply
+        let icon = |icon: &str| adw::ButtonContent::builder().icon_name(icon).build();
+        let sep = || gtk::Separator::new(gtk::Orientation::Vertical);
+        let menu_btn = |child: &adw::ButtonContent, tip: &str, m: &gio::Menu| {
+            gtk::MenuButton::builder().child(child).menu_model(m).tooltip_text(tip).always_show_arrow(true).build()
+        };
+        let split_btn = |icon: &str, action: &str, tip: &str, m: &gio::Menu| {
+            adw::SplitButton::builder()
+                .icon_name(icon)
+                .action_name(action)
+                .tooltip_text(tip)
+                .dropdown_tooltip(&format!("More {}", tip.split(' ').next().unwrap_or(tip).to_lowercase()))
+                .menu_model(m)
+                .build()
+        };
+
+        cmd.append(&menu_btn(
+            &labelled("list-add-symbolic", "New"),
+            "New",
+            &menu(&[("Folder…", "win.new-folder"), ("Empty File…", "win.new-file")]),
+        ));
+        cmd.append(&sep());
+        // Clipboard
+        cmd.append(&btn("view-pin-symbolic", "win.add-bookmark", "Pin to Sidebar (Ctrl+D)"));
+        cmd.append(&btn("edit-cut-symbolic", "win.cut", "Cut (Ctrl+X)"));
+        cmd.append(&split_btn(
+            "edit-copy-symbolic",
+            "win.copy",
+            "Copy (Ctrl+C)",
+            &menu(&[("Copy", "win.copy"), ("Copy Path", "win.copy-path")]),
+        ));
+        cmd.append(&split_btn(
+            "edit-paste-symbolic",
+            "win.paste",
+            "Paste (Ctrl+V)",
+            &menu(&[("Paste", "win.paste"), ("Paste as Link", "win.paste-link")]),
+        ));
+        cmd.append(&sep());
+        // Organize
+        cmd.append(&menu_btn(
+            &icon("send-to-symbolic"),
+            "Move to",
+            &menu(&[("Other Pane", "win.move-other"), ("Choose Folder…", "win.move-to")]),
+        ));
+        cmd.append(&menu_btn(
+            &icon("document-send-symbolic"),
+            "Copy to",
+            &menu(&[("Other Pane", "win.copy-other"), ("Choose Folder…", "win.copy-to")]),
+        ));
+        cmd.append(&split_btn(
+            "user-trash-symbolic",
+            "win.trash",
+            "Delete: Move to Trash (Delete)",
+            &menu(&[("Move to Trash", "win.trash"), ("Delete Permanently", "win.delete")]),
+        ));
+        cmd.append(&btn("document-edit-symbolic", "win.rename", "Rename (F2)"));
+        cmd.append(&sep());
+        // Archive: Compress always; Extract while an archive is selected (Explorer's Extract tab)
+        let compress = gtk::Button::builder()
+            .child(&icon("package-x-generic-symbolic"))
+            .action_name("win.compress")
+            .tooltip_text("Compress…")
+            .build();
+        cmd.append(&compress);
+        let extract = adw::SplitButton::builder()
+            .child(&labelled("folder-download-symbolic", "Extract"))
+            .action_name("win.extract")
+            .tooltip_text("Extract Here")
+            .dropdown_tooltip("More extract")
+            .menu_model(&menu(&[
+                ("Extract Here", "win.extract"),
+                ("Extract To…", "win.extract-to"),
+                ("Browse Archive", "win.browse-archive"),
+            ]))
+            .build();
+        // contextual buttons are shown only while they apply
+        extract.bind_property("sensitive", &extract, "visible").sync_create().build();
+        cmd.append(&extract);
         for (icon, label, action) in [
-            ("package-x-generic-symbolic", "Extract", "win.extract"),
             ("edit-undo-symbolic", "Restore", "win.restore"),
             ("user-trash-full-symbolic", "Empty Trash…", "win.empty-trash"),
         ] {
@@ -435,29 +501,34 @@ impl Win {
             b.bind_property("sensitive", &b, "visible").sync_create().build();
             cmd.append(&b);
         }
-        cmd.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-        cmd.append(
-            &gtk::MenuButton::builder()
-                .child(&labelled("view-grid-symbolic", "View"))
-                .menu_model(&view_menu)
-                .tooltip_text("View")
-                .build(),
-        );
+        cmd.append(&sep());
+        // Open
+        cmd.append(&menu_btn(
+            &icon("document-open-symbolic"),
+            "Open",
+            &menu(&[
+                ("Open", "win.open"),
+                ("Open With…", "win.open-with"),
+                ("Open in New Tab", "win.open-tab"),
+                ("Open in Terminal", "win.terminal"),
+            ]),
+        ));
+        cmd.append(&btn("document-properties-symbolic", "win.properties", "Properties (Alt+Enter)"));
+        // Select
+        cmd.append(&menu_btn(
+            &icon("selection-mode-symbolic"),
+            "Select",
+            &menu(&[
+                ("Select All", "win.select-all"),
+                ("Select None", "win.select-none"),
+                ("Invert Selection", "win.invert-selection"),
+            ]),
+        ));
+        cmd.append(&sep());
+        cmd.append(&menu_btn(&icon("view-grid-symbolic"), "View", &view_menu));
         let more = gio::Menu::new();
-        let m = gio::Menu::new();
-        m.append(Some("Undo"), Some("win.undo"));
-        m.append(Some("Copy Path"), Some("win.copy-path"));
-        m.append(Some("Compress…"), Some("win.compress"));
-        m.append(Some("Delete Permanently"), Some("win.delete"));
-        more.append_section(None, &m);
-        let m = gio::Menu::new();
-        m.append(Some("Add Bookmark"), Some("win.add-bookmark"));
-        m.append(Some("Open in Terminal"), Some("win.terminal"));
-        more.append_section(None, &m);
-        let m = gio::Menu::new();
-        m.append(Some("Properties"), Some("win.properties"));
-        m.append(Some("Preferences"), Some("win.preferences"));
-        more.append_section(None, &m);
+        more.append_section(None, &menu(&[("Undo", "win.undo"), ("Copy Path", "win.copy-path")]));
+        more.append_section(None, &menu(&[("Preferences", "win.preferences")]));
         cmd.append(
             &gtk::MenuButton::builder()
                 .icon_name("view-more-symbolic")
@@ -465,12 +536,19 @@ impl Win {
                 .tooltip_text("See More")
                 .build(),
         );
+        // too wide for a small window: scrolls sideways (touchpad, wheel) instead of widening the window
+        let cmd_bar = gtk::ScrolledWindow::builder()
+            .child(&cmd)
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .build();
         hrow.append(&row);
         hrow.append(&ends);
 
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
-        main.add_top_bar(&cmd);
+        main.add_top_bar(&cmd_bar);
         main.add_top_bar(&banner);
         main.add_top_bar(&bar.chips);
         // file-operation progress: what's running, how far, time left, Cancel
@@ -677,7 +755,11 @@ impl Win {
             ("extract-to", archive),
             ("browse-archive", infos.iter().any(|i| crate::archive::browsable(&i.name().to_string_lossy()))),
             ("paste", in_dir),
+            ("paste-link", in_dir),
+            ("copy-to", any),
+            ("move-to", any && !trash),
             ("new-folder", in_dir),
+            ("new-file", in_dir),
         ] {
             if let Some(a) = self.window.lookup_action(name).and_downcast::<gio::SimpleAction>() {
                 a.set_enabled(on);
@@ -860,6 +942,9 @@ impl Win {
             ("<Control>x", "win.cut"),
             ("<Control>v", "win.paste"),
             ("<Control>z", "win.undo"),
+            ("<Control>a", "win.select-all"),
+            ("<Control><Shift>a", "win.select-none"),
+            ("<Control><Shift>i", "win.invert-selection"),
             ("BackSpace", "win.up"),
             ("<Alt>Return", "win.properties"),
             ("<Control><Shift>c", "win.copy-path"),
