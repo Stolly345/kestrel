@@ -42,6 +42,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Empty trash…", "win.empty-trash", None),
     ("New folder…", "win.new-folder", None),
     ("New empty file…", "win.new-file", None),
+    ("Select mode (checkboxes)", "win.select-mode", None),
     ("Select all", "win.select-all", None),
     ("Select none", "win.select-none", None),
     ("Invert selection", "win.invert-selection", None),

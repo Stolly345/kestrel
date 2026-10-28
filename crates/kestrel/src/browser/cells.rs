@@ -72,10 +72,14 @@ pub(crate) fn factory(
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let w = setup();
         row_gestures(&w, item, &bw);
-        if view.is_some() {
-            folder_drop_target(&w, item, &bw);
-        }
-        item.set_child(Some(&w));
+        let child = match (view, bw.upgrade()) {
+            (Some(v), Some(b)) => {
+                folder_drop_target(&w, item, &bw);
+                with_check(&b, &w, item, v == 1)
+            }
+            _ => w,
+        };
+        item.set_child(Some(&child));
     });
     let bw = b.clone();
     f.connect_bind(move |_, item| {
@@ -83,11 +87,64 @@ pub(crate) fn factory(
         if let (Some(v), Some(b)) = (view, bw.upgrade()) {
             b.rows.borrow_mut().insert((item.position(), v), item.downgrade());
         }
-        if let (Some(w), Some(info)) = (item.child(), item.item().and_downcast::<gio::FileInfo>()) {
+        let w = item.child().map(|w| if view.is_some() { unwrap_check(&w) } else { w });
+        if let (Some(w), Some(info)) = (w, item.item().and_downcast::<gio::FileInfo>()) {
             bind(&w, &info);
         }
     });
     f
+}
+
+/// Select mode's checkbox: in front of a row, or on a tile's corner. It mirrors the item's selection,
+/// and ticking it adds the item to the selection (or takes it out) without touching the others.
+fn with_check(b: &Browser, w: &gtk::Widget, item: &gtk::ListItem, tile: bool) -> gtk::Widget {
+    let check = gtk::CheckButton::builder()
+        .visible(b.select_mode.get())
+        .halign(gtk::Align::Start)
+        .valign(if tile { gtk::Align::Start } else { gtk::Align::Center })
+        .css_classes(["select-check"])
+        .build();
+    check.update_property(&[gtk::accessible::Property::Label("Select")]);
+    item.bind_property("selected", &check, "active").sync_create().build();
+    let (iw, bw) = (item.downgrade(), b.me.clone());
+    check.connect_toggled(move |c| {
+        let (Some(it), Some(b)) = (iw.upgrade(), bw.upgrade()) else { return };
+        if c.is_active() != it.is_selected() {
+            if c.is_active() {
+                b.sel().select_item(it.position(), false);
+            } else {
+                b.sel().unselect_item(it.position());
+            }
+        }
+    });
+    // the row selects on press (replacing the selection): claim the press first and toggle here
+    let g = gtk::GestureClick::new();
+    g.connect_pressed(|g, _, _, _| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(c) = g.widget().and_downcast::<gtk::CheckButton>() {
+            c.set_active(!c.is_active());
+        }
+    });
+    check.add_controller(g);
+    b.checks.borrow_mut().push(check.downgrade());
+    if tile {
+        let o = gtk::Overlay::builder().child(w).build();
+        o.add_overlay(&check);
+        o.upcast()
+    } else {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        row.append(&check);
+        row.append(w);
+        row.upcast()
+    }
+}
+
+/// The view's own widget inside with_check's wrapper.
+fn unwrap_check(w: &gtk::Widget) -> gtk::Widget {
+    match w.downcast_ref::<gtk::Overlay>() {
+        Some(o) => o.child().unwrap(),
+        None => w.last_child().unwrap(),
+    }
 }
 
 pub(crate) fn label_factory(b: &Weak<Browser>, xalign: f32, text: impl Fn(&gio::FileInfo) -> String + 'static) -> gtk::SignalListItemFactory {

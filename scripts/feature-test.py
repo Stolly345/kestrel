@@ -305,7 +305,8 @@ def drag(src, dst):
 
 def press_button(name, contains=None):
     """Buttons by their accessible "click" action: no coordinates, so dialogs and popovers work."""
-    b = one("button", name, contains=contains)
+    # the last match: a dialog's "Delete" / "Rename" comes after the command bar's in the tree
+    b = wait(lambda: all_("button", name, contains=contains)[-1], f"button {name or contains}", 5)
     if not activate(b):
         click(b)
     time.sleep(0.5)
@@ -634,7 +635,10 @@ def palette(cmd):
 @test("files: New > Empty File from the command bar")
 def _():
     start(D)
-    press_button("New"); pick("Empty File…")
+    t = one("toggle button", "New")
+    if not activate(t):
+        click(t)
+    pick("Empty File…")
     e = wait(lambda: [x for x in all_("text") + all_("entry") if text_of(x) == "New Document.txt"][0], "the name field")
     set_text(e, "fresh.txt"); key("Return")
     eventually(lambda: os.path.isfile(os.path.join(D, "fresh.txt")), "the file on disk")
@@ -657,6 +661,27 @@ def _():
     select("notes.md"); key("Control_L", "Shift_L", "i")
     eventually(lambda: f"{len(names()) - 1} selected" in status(), "all but one selected")
     key("Control_L", "Shift_L", "a"); eventually(lambda: "selected" not in status(), "none selected")
+
+
+def tick(box):
+    """A real mouse press on a checkbox: AT-SPI has no action for it, and its reported extents sit
+    about (16, 11) up-left of where it's drawn (a press there lands on the row instead)."""
+    x, y = point(box)
+    xtest.fake_input(dpy, X.MotionNotify, x=x + 16, y=y + 11)
+    xtest.fake_input(dpy, X.ButtonPress, 1); xtest.fake_input(dpy, X.ButtonRelease, 1)
+    dpy.sync(); time.sleep(0.6)
+
+
+@test("select mode: checkboxes add to the selection one by one")
+def _():
+    start(D)
+    palette("select mode")
+    boxes = wait(lambda: [b for b in all_("check box") if b.get_name() == "Select"][:3], "checkboxes")
+    assert len(boxes) == 3, f"{len(boxes)} checkboxes"
+    tick(boxes[0]); tick(boxes[2])
+    eventually(lambda: "2 selected" in status(), "two ticked items selected")
+    tick(boxes[0])
+    eventually(lambda: "1 selected" in status(), "unticking takes one out")
 
 
 @test("files: Delete moves to the trash, Ctrl+Z brings it back")

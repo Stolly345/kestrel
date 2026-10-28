@@ -231,6 +231,9 @@ pub struct Browser {
     /// Folder view scroll positions (list, grid), restored when a search is cleared.
     saved_scroll: Cell<(f64, f64)>,
     show_hidden: Rc<Cell<bool>>,
+    /// Select mode: a checkbox on every row/tile (see cells::with_check).
+    select_mode: Cell<bool>,
+    checks: RefCell<Vec<glib::WeakRef<gtk::CheckButton>>>,
     mode: Cell<Mode>,
     pub page: RefCell<Option<adw::TabPage>>,
     /// Window hooks: header refresh, selection changes (preview pane), daemon reachable or not.
@@ -565,6 +568,8 @@ impl Browser {
             search_state: RefCell::new(SearchState::Running),
             saved_scroll: Cell::new((0.0, 0.0)),
             show_hidden,
+            select_mode: Cell::new(false),
+            checks: RefCell::default(),
             mode: Cell::new(Mode::List),
             page: RefCell::default(),
             on_change: RefCell::default(),
@@ -1071,6 +1076,18 @@ impl Browser {
     pub fn set_show_hidden(&self, on: bool) {
         self.show_hidden.set(on);
         self.filter.changed(gtk::FilterChange::Different);
+    }
+
+    pub fn set_select_mode(&self, on: bool) {
+        self.select_mode.set(on);
+        // rows are recycled, not freed, so this stays as long as the views' visible rows
+        self.checks.borrow_mut().retain(|c| match c.upgrade() {
+            Some(c) => {
+                c.set_visible(on);
+                true
+            }
+            None => false,
+        });
     }
 
     pub fn set_mode(&self, m: Mode) {

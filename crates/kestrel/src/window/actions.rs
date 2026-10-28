@@ -404,6 +404,17 @@ impl Win {
         });
         self.window.add_action(&a);
         let me = self.me.clone();
+        let a = gio::SimpleAction::new_stateful("select-mode", None, &false.to_variant());
+        a.connect_activate(move |a, _| {
+            let on = !a.state().and_then(|s| s.get::<bool>()).unwrap_or(false);
+            a.set_state(&on.to_variant());
+            if let Some(w) = me.upgrade() {
+                w.select_mode.set(on);
+                w.panes.iter().flat_map(|p| p.browsers()).for_each(|b| b.set_select_mode(on));
+            }
+        });
+        self.window.add_action(&a);
+        let me = self.me.clone();
         let a = gio::SimpleAction::new_stateful("show-hidden", None, &false.to_variant());
         a.connect_activate(move |a, _| {
             let on = !a.state().and_then(|s| s.get::<bool>()).unwrap_or(false);

@@ -523,3 +523,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   (all Ctrl+A, none Ctrl+Shift+A, invert Ctrl+Shift+I). All new actions are in the palette. Icons with tooltips
   (Windows 11 style): with labels the bar needs ~1450 px; as icons ~1040 px, so the default window is now 1280
   wide and a narrower one scrolls the bar sideways. Not done: Easy access, Edit, History (Windows-only ideas).
+- **v0.9.25 (2026-10-28): two-row command bar, select checkboxes, compact tabs.** The command bar is two labelled
+  rows (New | Pin, Cut, Copy ▾, Paste ▾ | Delete ▾, Rename, Undo / Compress, Extract ▾ | Open ▾, Properties |
+  Select | View ▾); Move to / Copy to left the bar (still in the palette), the ⋯ menu went (all of it lives
+  elsewhere). Properties has an info icon (the old one read as Settings); search help is a question icon.
+  Select mode (win.select-mode): a checkbox on every row/tile ticks items into the selection one by one; All /
+  None / Invert show while it's on. The checkbox claims the press, or the row would replace the selection.
+  Columns view has none. Tabs 46 → 34 px and the location bar 34 → 28 px by padding only (text size unchanged).
+  Extract's split button follows the action's enabled state (an AdwSplitButton never goes insensitive itself).

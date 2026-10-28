@@ -109,6 +109,9 @@ expect() {
 
 shot details "$D"
 shot command-bar-archive "$D" --select sample.zip
+shot tabs-preview "$D" "$D/Projects" --action preview
+shot select-mode "$D" --action select-mode --select notes.md --select report.pdf
+shot select-mode-grid "$D" --mode grid --action select-mode --select notes.md
 shot grid "$D" --mode grid
 shot columns "$D" --mode columns --select Projects
 shot dual "$D" --dual

@@ -29,7 +29,17 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 const CSS: &str = "
-.command-bar separator { margin: 6px 1px; }
+.command-bar > .toolbar { padding: 2px 6px; }
+.command-bar > .toolbar:first-child { padding-top: 4px; }
+.command-bar > .toolbar:last-child { padding-bottom: 4px; }
+.command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
+.command-bar separator { margin: 5px 3px; }
+/* compact tabs: less padding only, the font stays the size it was, so names never clip */
+.pane tabbar tabbox { padding-top: 3px; padding-bottom: 3px; min-height: 28px; }
+.pane tabbar tab { min-height: 22px; padding: 1px 4px; }
+.pane tabbar tab button.image-button { min-width: 20px; min-height: 20px; }
+.pane tabbar .start-action, .pane tabbar .end-action { padding-top: 3px; padding-bottom: 3px; }
+.pane tabbar .end-action button { min-height: 24px; min-width: 24px; padding: 0; }
 image.thumb { outline: 1px solid alpha(currentColor, 0.25); outline-offset: -1px; border-radius: 2px; }
 .md-page, .md-page > viewport { background: #ffffff; color: #1e1e1e; }
 levelbar.usage block.used { background: @accent_bg_color; }
@@ -40,14 +50,14 @@ levelbar.usage block { min-height: 4px; }
 .miller-col { border-right: 1px solid alpha(currentColor, 0.12); }
 .statusbar { min-height: 22px; }
 .statusbar.error { color: @error_color; opacity: 1; }
-.location-bar { padding: 2px 6px; border-bottom: 1px solid alpha(currentColor, 0.08); min-height: 34px; }
-.location-bar .crumb { padding: 2px 6px; min-height: 26px; }
+.location-bar { padding: 1px 6px; border-bottom: 1px solid alpha(currentColor, 0.08); min-height: 28px; }
+.location-bar .crumb { padding: 0 6px; min-height: 24px; }
 .main-search { min-height: 34px; font-size: 1.05em; }
 .chip-bar { padding: 4px 10px; border-bottom: 1px solid alpha(currentColor, 0.08); }
 menubutton.chip > button { padding: 2px 10px; min-height: 26px; border-radius: 99px; }
 menubutton.chip.chip-active > button { background: alpha(@accent_bg_color, 0.22); color: @accent_color; }
 .preview-pane { background: var(--sidebar-bg-color); border-left: 1px solid var(--border-color); }
-.preview-header { padding: 0 6px 0 14px; min-height: 46px; border-bottom: 1px solid var(--border-color); }
+.preview-header { padding: 0 6px 0 14px; min-height: 34px; border-bottom: 1px solid var(--border-color); }
 .tag-dot.tag-big { min-width: 16px; min-height: 16px; color: white; box-shadow: inset 0 0 0 1px alpha(black, 0.15); }
 button.tag-pick { min-width: 22px; min-height: 22px; padding: 1px; }
 .tag-dot.tag-big.tag-small { min-width: 14px; min-height: 14px; }
