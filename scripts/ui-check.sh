@@ -127,6 +127,8 @@ shot properties "$D" --select report.pdf --action properties
 shot properties-folder "$D/Projects"  --action properties
 shot batch-rename "$D" --select IMG_0001.txt --select IMG_0002.txt --select IMG_0003.txt --action rename
 shot palette "$D" --action palette
+shot open-with "$D" --select notes.md --action open-with
+shot set-default-app "$D" --select report.pdf --action set-default-app
 shot preferences "$D" --action preferences
 shot search-syntax "$D" --action syntax
 shot terminal-panel "$D/Projects" --action terminal-panel

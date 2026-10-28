@@ -24,6 +24,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Toggle preview pane", "win.preview", None),
     ("Open", "win.open", None),
     ("Open with…", "win.open-with", None),
+    ("Set default app…", "win.set-default-app", None),
     ("Open in new tab", "win.open-tab", None),
     ("Open in other pane", "win.open-other", None),
     ("Copy", "win.copy", None),

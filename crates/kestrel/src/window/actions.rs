@@ -48,11 +48,12 @@ impl Win {
                 b.open_info(&i);
             }
         });
-        self.act("open-with", |w| {
-            if let (Some(b), Some(f)) = (w.current(), w.sel().into_iter().next()) {
-                b.launch(&f, true);
-            }
-        });
+        for (name, set_default) in [("open-with", false), ("set-default-app", true)] {
+            self.act(name, move |w| {
+                let info = w.current().and_then(|b| b.selected_infos().into_iter().next());
+                crate::openwith::show(&w.ops, w.sel(), info.as_ref(), set_default);
+            });
+        }
         self.act("open-tab", |w| {
             let Some(b) = w.current() else { return };
             for i in b.selected_infos().iter().filter(|i| i.file_type() == gio::FileType::Directory) {
@@ -318,27 +319,8 @@ impl Win {
                 return;
             };
             let Some(dir) = b.dir() else { return };
-            let bw = Rc::downgrade(&b);
             let ops = w.ops.clone();
-            w.ops.new_document(dir, kind, name, contents, move |f| {
-                // by the name's type: an empty file sniffs as "application/x-zerosize", which no
-                // editor claims. Nothing set for the type: let the person choose.
-                let name = f.basename().unwrap_or_default();
-                let (ct, _) = gio::content_type_guess(Some(&name), None::<&[u8]>);
-                let launched = gio::AppInfo::default_for_type(&ct, false).map(|app| {
-                    let ctx = gtk::prelude::WidgetExt::display(&ops.toasts).app_launch_context();
-                    app.launch(&[f.clone()], Some(&ctx))
-                });
-                match launched {
-                    Some(Ok(())) => {}
-                    Some(Err(e)) => ops.toast(&crate::browser::human_gio(&e)),
-                    None => {
-                        if let Some(b) = bw.upgrade() {
-                            b.launch(&f, true);
-                        }
-                    }
-                }
-            });
+            w.ops.new_document(dir, kind, name, contents, move |f| crate::openwith::open_default(&ops, &f));
         });
         self.window.add_action(&a);
         let me = self.me.clone();

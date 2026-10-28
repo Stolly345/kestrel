@@ -7,6 +7,7 @@ mod fileops;
 mod git;
 mod icon;
 mod network;
+mod openwith;
 mod palette;
 mod prefs;
 mod preview;

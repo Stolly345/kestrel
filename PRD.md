@@ -185,7 +185,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F10 | Command bar like Explorer's Home ribbon, one or two rows by available width | P1 (done 0.9.26) |
 | F11 | Select mode: checkboxes on items; All / None / Invert | P1 (done 0.9.25) |
 | F12 | New ▸ documents (txt, md, docx, xlsx, pptx, pdf) and shortcuts, opened in the default app | P1 (done 0.9.28) |
-| F13 | Open With ▸ Set as Default, so default apps can be changed without leaving Kestrel | P2 |
+| F13 | Open With with "Always use for this file type", and Set Default App, so default apps can be changed without leaving Kestrel | P1 (done 0.9.29) |
 
 ### 7.5 CLI
 - `ks` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
@@ -570,3 +570,10 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   same New submenu. Fix: a search through subfolders can list a folder and files in it; trash / delete / move
   of both reported "it isn't there any more" after the folder took them along (fileops::outermost). Also: a
   search tab selects (--select, Show in Folder) even when the results arrived first.
+- **v0.9.29 (2026-10-28): Open With and Set Default App.** Kestrel's own app chooser (openwith.rs) replaces
+  the portal's: the apps registered for the file's type, the current default first and marked, and Windows'
+  "Always use this app" as an *Always use for this file type* switch. **Set Default App…** (Open ▾, the
+  item menu, the palette) is the same list without opening anything. Defaults are saved with
+  `AppInfo::set_as_default_for_type`, i.e. ~/.config/mimeapps.list, where GNOME Files saves them. One click
+  picks an app; a double-click or Enter also confirms (a single click confirming set defaults by accident).
+  An empty file's type comes from its name (it sniffs as application/x-zerosize, which no app claims).

@@ -677,6 +677,45 @@ def _():
     assert "word/document.xml" in zipfile.ZipFile(p).namelist(), "not a real .docx"
 
 
+def pick_app(name):
+    """Select an app in the Open With list through AT-SPI's Selection: no coordinates (inside a
+    dialog they're reported tens of pixels off) and no scrolling."""
+    def find():
+        for lst in all_("list"):
+            rows = [lst.get_child_at_index(i) for i in range(lst.get_child_count())]
+            names = [r.get_name() for r in rows]
+            if name in names:
+                return lst.get_selection_iface().select_child(names.index(name))
+    wait(find, f"app {name}")
+    time.sleep(0.3)
+
+
+@test("open with: Set Default App and Open With > Always use change the default for the type")
+def _():
+    out = fake_default_app("text/markdown")
+    apps = os.path.join(HOME, ".local/share/applications")
+    open(os.path.join(apps, "ft-other.desktop"), "w").write(
+        "[Desktop Entry]\nType=Application\nName=FT Other\nExec=sh -c 'echo %f > \"$HOME/other\"'\nMimeType=text/markdown;\n")
+    # GIO lists an app for a type from the folder's mimeinfo.cache, as installed apps have
+    subprocess.run(["update-desktop-database", apps], check=True)
+    mimeapps = os.path.join(HOME, ".config/mimeapps.list")
+    default = lambda: open(mimeapps).read().split("[Default Applications]")[1].split("[")[0]
+    start(D)
+    select("notes.md"); palette("set default app")
+    # the default comes first and the test's own apps next, ahead of any real ones
+    pick_app("FT Other")
+    press_button("Set as Default")
+    eventually(lambda: "text/markdown=ft-other.desktop" in default(), "FT Other as the default")
+    # Open With, Always use on: opens, and switches the default back
+    select("notes.md"); palette("open with")
+    always = wait(lambda: [n for n in all_() if n.get_name() == "Always use for this file type"][-1], "the Always use switch")
+    if not activate(always):
+        click(always)
+    pick_app("FT Open"); press_button("Open")
+    eventually(lambda: os.path.exists(out) and "notes.md" in open(out).read(), "opened in FT Open")
+    eventually(lambda: "text/markdown=ft-open.desktop" in default(), "FT Open the default again")
+
+
 @test("files: Paste as Link makes a symlink")
 def _():
     start(D)

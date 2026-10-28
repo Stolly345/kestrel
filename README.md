@@ -67,7 +67,8 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
 - A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
-- New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type (change those in GNOME Files: right-click › Open With… › Always use for this file type, or `gio mime TYPE APP.desktop`)
+- New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type (change those with Open ▾ › Set Default App…)
+- Open With lists the apps for a file's type, with *Always use for this file type*; Set Default App changes the default without opening anything. Saved where GNOME Files saves it, so every app agrees
 - Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
@@ -232,7 +233,7 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   Extract produces. Samples live in `crates/kestrel/tests/fixtures/archives/` and are built by
   `scripts/make-archive-fixtures.sh`; a new extension fails the test until it has one.
   Per-format report: `cargo test -p kestrel every_format -- --nocapture`.
-- **`scripts/ui-check.sh`** drives the real app through 35 screens under a virtual display
+- **`scripts/ui-check.sh`** drives the real app through 37 screens under a virtual display
   (views, previews, dialogs, batch rename, terminal, search and its empty/off states, a folder
   you can't open, Extract and its conflict prompt, Trash, the command bar in one and two rows,
   Select mode) with a throwaway home folder and its
@@ -241,7 +242,7 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
 - **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
   shortcuts through the accessibility layer under a virtual display, then checks the result on disk
   and on screen. 57 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
-  copy/move/rename/undo/redo/trash/restore/delete and name clashes, New documents opening in their apps, Paste as Link, Select
+  copy/move/rename/undo/redo/trash/restore/delete and name clashes, New documents opening in their apps, Open With and Set Default App, Paste as Link, Select
   mode and its checkboxes, batch rename, tags, search (typing, type
   ranking, scopes, tags, content, saved searches, the query language), previews, properties and
   checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and

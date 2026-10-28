@@ -160,6 +160,7 @@ fn menus() -> (gio::Menu, gio::Menu) {
     let s = gio::Menu::new();
     s.append(Some("Open"), Some("win.open"));
     s.append(Some("Open With…"), Some("win.open-with"));
+    s.append(Some("Set Default App…"), Some("win.set-default-app"));
     s.append(Some("Open in New Tab"), Some("win.open-tab"));
     s.append(Some("Open in Other Pane"), Some("win.open-other"));
     item.append_section(None, &s);
@@ -469,6 +470,7 @@ impl Win {
             &menu(&[
                 ("Open", "win.open"),
                 ("Open With…", "win.open-with"),
+                ("Set Default App…", "win.set-default-app"),
                 ("Open in New Tab", "win.open-tab"),
                 ("Open in Terminal", "win.terminal"),
             ]),
@@ -756,6 +758,7 @@ impl Win {
         for (name, on) in [
             ("open", any),
             ("open-with", any),
+            ("set-default-app", any),
             ("open-tab", folder),
             ("open-other", folder || in_dir),
             ("cut", any),
