@@ -81,10 +81,10 @@ pub fn new_menu() -> gio::Menu {
     m
 }
 
-/// Command-bar width (sp) from which it fits on one row; narrower, it takes two. Icons only, the rows
-/// measure 510 + 337 px (Extract and the Select buttons only add while shown, and scroll if they don't
-/// fit), so a normal window has one row and only a narrow one (or one with the preview pane open) two.
-const ONE_ROW_WIDTH: u32 = 880;
+/// Command-bar sizes by the bar's own width (sp), smallest first: (from this width, CSS size class).
+/// Below the first: two compact rows. One row measures 583 px compact, 783 normal, 1081 large; each
+/// step adds ~50 for Extract or Select's All / None / Invert (anything that still doesn't fit scrolls).
+const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1140, "large")];
 
 pub struct Pane {
     pub root: gtk::Box,
@@ -561,10 +561,16 @@ impl Win {
             .propagate_natural_height(true)
             .build();
         let cmd_bar = adw::BreakpointBin::builder().width_request(1).height_request(1).child(&cmd_scroll).build();
-        let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("min-width: {ONE_ROW_WIDTH}sp")).unwrap());
-        bp.add_setter(&cmd, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
-        bp.add_setter(&row_sep, "visible", Some(&true.to_value()));
-        cmd_bar.add_breakpoint(bp);
+        // narrowest: two compact rows; wider, one row that grows (the last matching breakpoint wins)
+        cmd.add_css_class("compact");
+        for (width, size) in BAR_SIZES {
+            let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("min-width: {width}sp")).unwrap());
+            let classes: Vec<&str> = ["command-bar", size].into_iter().filter(|c| !c.is_empty()).collect();
+            bp.add_setter(&cmd, "css-classes", Some(&classes.to_value()));
+            bp.add_setter(&cmd, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
+            bp.add_setter(&row_sep, "visible", Some(&true.to_value()));
+            cmd_bar.add_breakpoint(bp);
+        }
         hrow.append(&row);
         hrow.append(&ends);
 

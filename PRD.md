@@ -84,8 +84,9 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **A scope selector** sits next to the search box: *Everywhere* / *This folder* / *This folder only (no subfolders)*. It shows plainly what's being searched. *This folder* uses `under:` and *This folder only* uses `parent:`, so you never have to type those.
 - **Command bar** (0.9.23–0.9.30) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
   Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's order).
-  Icons only (0.9.30): each button's name and shortcut is its tooltip and its accessible name. One row
-  from 880 sp of bar width, two rows split between Paste and Rename below that. **Properties** (ⓘ) sits
+  Icons only (0.9.30): each button's name and shortcut is its tooltip and its accessible name. Sizes by
+  the bar's own width (0.9.31, `BAR_SIZES`): large (20 px icons) from 1140 sp, normal from 840, compact
+  from 630, all one row; below that two compact rows split between Paste and Rename. **Properties** (ⓘ) sits
   at the start of each pane's location bar, left of the home crumb: the selection, or the folder. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
   Select's All / None / Invert show only while they apply.
 - **Focus on launch:** the search box has focus when a window opens. Esc clears it, a second Esc returns to the folder, and Down moves into the results.
@@ -183,7 +184,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F7 | Git column and branch; colour tags; command palette; properties; archives | P1 (exists) |
 | F8 | Can be set as the default file manager (`inode/directory`) without breaking "Show in Folder" from other apps (D-Bus `org.freedesktop.FileManager1`) | P1 |
 | F9 | Custom tag names, not just the 7 fixed colours | P2 |
-| F10 | Command bar like Explorer's Home ribbon: icons with named tooltips, one or two rows by available width | P1 (done 0.9.30) |
+| F10 | Command bar like Explorer's Home ribbon: icons with named tooltips that grow or shrink to stay on one row, two rows only when narrow | P1 (done 0.9.31) |
 | F11 | Select mode: checkboxes on items; All / None / Invert | P1 (done 0.9.25) |
 | F12 | New ▸ documents (txt, md, docx, xlsx, pptx, pdf) and shortcuts, opened in the default app | P1 (done 0.9.28) |
 | F13 | Open With with "Always use for this file type", and Set Default App, so default apps can be changed without leaving Kestrel | P1 (done 0.9.29) |
@@ -591,3 +592,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   song never ended. The test session now ranks GStreamer's fakeaudiosink first (keeps real time, silent).
   Its "next / previous song" checks looked for a label with the song's name, which the file list always
   has, so they couldn't fail; they now read the music card's title (`card_title()`). 12/12 under heavy load.
+- **v0.9.31 (2026-10-28): the command bar resizes to stay on one row.** Sizes by the bar's own width (so the
+  sidebar and preview pane count): large, 20 px icons, from 1140 sp; normal from 840; compact (tighter buttons
+  and separators) from 630; all one row. Below that, two compact rows. Each step is an AdwBreakpoint on the
+  bar's BreakpointBin that sets its CSS size class. One row measures 583 / 783 / 1081 px; the margins leave room
+  for Extract or Select's All / None / Invert. Split-button arrows stay slim at the large size. ui-check
+  covers large, compact and two rows.

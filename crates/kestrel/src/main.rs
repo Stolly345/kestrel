@@ -34,6 +34,15 @@ const CSS: &str = "
 .command-bar > .toolbar { padding: 1px 6px; }
 .command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
 .command-bar separator { margin: 5px 3px; }
+/* command-bar sizes, picked by its width (window/mod.rs BAR_SIZES): large when there's room, compact
+   (and then two rows) when there isn't */
+.command-bar.large button, .command-bar.large splitbutton > button, .command-bar.large menubutton > button { min-height: 34px; min-width: 40px; }
+.command-bar.large image { -gtk-icon-size: 20px; }
+.command-bar.large splitbutton > menubutton > button { min-width: 16px; }
+.command-bar.large separator { margin: 6px 6px; }
+.command-bar.compact > .toolbar { padding: 1px 2px; border-spacing: 0; }
+.command-bar.compact button, .command-bar.compact splitbutton > button, .command-bar.compact menubutton > button { min-width: 22px; padding-left: 4px; padding-right: 4px; }
+.command-bar.compact separator { margin: 5px 1px; }
 /* compact tabs: less padding only, the font stays the size it was, so names never clip */
 .pane tabbar tabbox { padding-top: 3px; padding-bottom: 3px; min-height: 28px; }
 .pane tabbar tab { min-height: 22px; padding: 1px 4px; }

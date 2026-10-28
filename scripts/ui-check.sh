@@ -109,7 +109,9 @@ expect() {
 
 shot details "$D"
 shot command-bar-archive "$D" --select sample.zip
-SCREEN=1920x1080 shot command-bar-one-row "$D" --width 1920 --select sample.zip
+SCREEN=1920x1080 shot command-bar-large "$D" --width 1920 --select sample.zip
+shot command-bar-compact "$D" --select sample.zip --action preview
+shot command-bar-two-rows "$D" --width 600 --select sample.zip
 shot tabs-preview "$D" "$D/Projects" --action preview
 shot select-mode "$D" --action select-mode --select notes.md --select report.pdf
 shot select-mode-grid "$D" --mode grid --action select-mode --select notes.md
