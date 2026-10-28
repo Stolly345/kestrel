@@ -507,3 +507,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   and path bar now say "sample.zip" (`archive_source`), and the hidden-files filter no longer logs a CRITICAL
   there (archive listings have no is-hidden); archive mounts get no free-space bar (they report 100% full).
   Sidebar: File System and its free-space bar moved to the top, between Tags and Home (Alex's request).
+- **v0.9.23 (2026-10-27): command bar, single window icon.** A toolbar under the header modelled on Windows 11
+  Explorer's command bar: New ▾ (Folder) | Cut, Copy, Paste, Rename, Move to Trash | Extract, Restore, Empty
+  Trash… (shown only while they apply: the button's visibility follows its action's sensitivity) | View ▾ (moved
+  out of the header) | ⋯ (Undo, Copy Path, Compress, Delete Permanently, Add Bookmark, Open in Terminal,
+  Properties, Preferences). Fix: with a title-button layout that starts with `icon:` the window icon showed
+  twice (sidebar header + the content header's own WindowControls); the content header's start controls now
+  show only while the sidebar is hidden. ui-check.sh uses such a layout so it stays caught. Not done: Sort menu
+  (column headers sort), Share (no GNOME file-share), New → file, Select all/none/invert.

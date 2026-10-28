@@ -26,7 +26,7 @@ R=$(mktemp -d /tmp/kestrel-ui-run.XXXXXX)
 trap 'kill $IXD 2>/dev/null; chmod 700 "$H/Demo/locked" 2>/dev/null; rm -rf "$H" "$R"' EXIT
 D=$H/Demo
 mkdir -p "$D/Projects/aurora/src" "$H/.config/gtk-4.0" "$H/.local/share/nautilus/scripts"
-printf '[Settings]\ngtk-enable-animations=false\n' >"$H/.config/gtk-4.0/settings.ini"
+printf '[Settings]\ngtk-enable-animations=false\n# the window icon in the title buttons, as on some desktops: catches doubled title buttons\ngtk-decoration-layout=icon:minimize,maximize,close\n' >"$H/.config/gtk-4.0/settings.ini"
 fx=$root/crates/kestrel/tests/fixtures/archives
 cp "$fx/sample.zip" "$fx/sample.tar.gz" "$fx/sample.7z" "$D/"
 printf '# Aurora\n\nA tiny **weather station** dashboard.\n\n- Reads sensors every *30 s*\n- Charts the last 7 days\n- Alerts on frost\n\n```\ncargo run --release\n```\n' >"$D/notes.md"
@@ -108,6 +108,7 @@ expect() {
 }
 
 shot details "$D"
+shot command-bar-archive "$D" --select sample.zip
 shot grid "$D" --mode grid
 shot columns "$D" --mode columns --select Projects
 shot dual "$D" --dual

@@ -317,11 +317,11 @@ impl Win {
         let hrow = gtk::Box::builder().spacing(6).hexpand(true).build();
         let ends = gtk::Box::builder().spacing(6).build();
         header.set_title_widget(Some(&hrow));
-        for side in [gtk::PackType::Start, gtk::PackType::End] {
-            let c = gtk::WindowControls::new(side);
-            c.bind_property("empty", &c, "visible").invert_boolean().sync_create().build();
-            if side == gtk::PackType::Start { hrow.append(&c) } else { ends.append(&c) }
-        }
+        let start_controls = gtk::WindowControls::new(gtk::PackType::Start);
+        hrow.append(&start_controls);
+        let c = gtk::WindowControls::new(gtk::PackType::End);
+        c.bind_property("empty", &c, "visible").invert_boolean().sync_create().build();
+        ends.append(&c);
         let btn = |icon: &str, action: &str, tip: &str| gtk::Button::builder().icon_name(icon).action_name(action).tooltip_text(tip).build();
         let back_btn = btn("go-previous-symbolic", "win.back", "Back (Alt+Left)");
         let fwd_btn = btn("go-next-symbolic", "win.forward", "Forward (Alt+Right)");
@@ -344,6 +344,18 @@ impl Win {
             .invert_boolean()
             .sync_create()
             .build();
+        // the sidebar header already draws the left title buttons (window icon, etc.): only draw them
+        // here while the sidebar is hidden, or a layout like "icon:close" shows the icon twice
+        let sync = {
+            let (c, split) = (start_controls.clone(), split.clone());
+            move || c.set_visible(!c.is_empty() && !split.shows_sidebar())
+        };
+        sync();
+        split.connect_show_sidebar_notify({
+            let sync = sync.clone();
+            move |_| sync()
+        });
+        start_controls.connect_empty_notify(move |_| sync());
         hrow.append(&content_toggle);
         hrow.append(&back_btn);
         hrow.append(&fwd_btn);
@@ -388,20 +400,77 @@ impl Win {
         v.append(Some("Preview Pane"), Some("win.preview"));
         v.append(Some("Show Hidden Files"), Some("win.show-hidden"));
         view_menu.append_section(None, &v);
-        ends.prepend(
+        ends.prepend(&scope_w);
+
+        // command bar, like Windows 11 Explorer's: New | clipboard, rename, delete | View | ⋯.
+        // Buttons follow their actions, so update_actions greys them out to suit the selection.
+        let cmd = gtk::Box::builder().spacing(2).css_classes(["toolbar", "command-bar"]).build();
+        let labelled = |icon: &str, label: &str| adw::ButtonContent::builder().icon_name(icon).label(label).build();
+        let new_menu = gio::Menu::new();
+        new_menu.append(Some("Folder"), Some("win.new-folder"));
+        cmd.append(
             &gtk::MenuButton::builder()
-                .icon_name("view-grid-symbolic")
+                .child(&labelled("list-add-symbolic", "New"))
+                .menu_model(&new_menu)
+                .tooltip_text("New")
+                .build(),
+        );
+        cmd.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+        for (icon, action, tip) in [
+            ("edit-cut-symbolic", "win.cut", "Cut (Ctrl+X)"),
+            ("edit-copy-symbolic", "win.copy", "Copy (Ctrl+C)"),
+            ("edit-paste-symbolic", "win.paste", "Paste (Ctrl+V)"),
+            ("document-edit-symbolic", "win.rename", "Rename (F2)"),
+            ("user-trash-symbolic", "win.trash", "Move to Trash (Delete)"),
+        ] {
+            cmd.append(&btn(icon, action, tip));
+        }
+        // contextual, as Explorer shows "Extract all" only for archives: shown only while they apply
+        for (icon, label, action) in [
+            ("package-x-generic-symbolic", "Extract", "win.extract"),
+            ("edit-undo-symbolic", "Restore", "win.restore"),
+            ("user-trash-full-symbolic", "Empty Trash…", "win.empty-trash"),
+        ] {
+            let b = gtk::Button::builder().child(&labelled(icon, label)).action_name(action).build();
+            b.bind_property("sensitive", &b, "visible").sync_create().build();
+            cmd.append(&b);
+        }
+        cmd.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+        cmd.append(
+            &gtk::MenuButton::builder()
+                .child(&labelled("view-grid-symbolic", "View"))
                 .menu_model(&view_menu)
                 .tooltip_text("View")
                 .build(),
         );
-        // what to search sits with the view controls, right against the View button
-        ends.prepend(&scope_w);
+        let more = gio::Menu::new();
+        let m = gio::Menu::new();
+        m.append(Some("Undo"), Some("win.undo"));
+        m.append(Some("Copy Path"), Some("win.copy-path"));
+        m.append(Some("Compress…"), Some("win.compress"));
+        m.append(Some("Delete Permanently"), Some("win.delete"));
+        more.append_section(None, &m);
+        let m = gio::Menu::new();
+        m.append(Some("Add Bookmark"), Some("win.add-bookmark"));
+        m.append(Some("Open in Terminal"), Some("win.terminal"));
+        more.append_section(None, &m);
+        let m = gio::Menu::new();
+        m.append(Some("Properties"), Some("win.properties"));
+        m.append(Some("Preferences"), Some("win.preferences"));
+        more.append_section(None, &m);
+        cmd.append(
+            &gtk::MenuButton::builder()
+                .icon_name("view-more-symbolic")
+                .menu_model(&more)
+                .tooltip_text("See More")
+                .build(),
+        );
         hrow.append(&row);
         hrow.append(&ends);
 
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
+        main.add_top_bar(&cmd);
         main.add_top_bar(&banner);
         main.add_top_bar(&bar.chips);
         // file-operation progress: what's running, how far, time left, Cancel
