@@ -538,3 +538,5 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   (run_undo), which goes on the redo stack; a new action clears it. Copied undo steps now keep their sources
   so a copy can be redone. Search help moved to the far side of the scope dropdown. `kestrel --width N` and
   ui-check's SCREEN= for wide screenshots.
+- **v0.9.27 (2026-10-28): no search-help button.** The "?" beside the search box is gone (Yaru drew it oddly,
+  and it duplicated ☰ → Search Syntax, the palette and `ks --syntax`; the placeholder already shows an example).

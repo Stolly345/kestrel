@@ -248,28 +248,11 @@ impl Win {
             .build();
         let scope = gtk::DropDown::from_strings(&Scope::ALL.map(|s| s.label()));
         scope.set_tooltip_text(Some("What to search"));
-        let help = gtk::MenuButton::builder()
-            .icon_name("help-faq-symbolic")
-            .tooltip_text("Search syntax")
-            .css_classes(["flat"])
-            .popover(
-                &gtk::Popover::builder()
-                    .child(
-                        &gtk::Label::builder()
-                            .label(SYNTAX)
-                            .css_classes(["monospace"])
-                            .margin_start(6)
-                            .margin_end(6)
-                            .build(),
-                    )
-                    .build(),
-            )
-            .build();
         let row = gtk::Box::builder().spacing(6).hexpand(true).css_classes(["search-row"]).build();
         row.append(&entry);
         let history = gtk::Popover::builder().autohide(false).has_arrow(false).halign(gtk::Align::Start).build();
         history.set_parent(&entry);
-        let (scope_w, help_w) = (scope.clone(), help.clone());
+        let scope_w = scope.clone();
 
         // filter chips: each edits its own tokens in the query text, so chips and syntax never disagree
         let chip_box = gtk::Box::builder().spacing(6).css_classes(["chip-bar"]).build();
@@ -407,8 +390,6 @@ impl Win {
         v.append(Some("Show Hidden Files"), Some("win.show-hidden"));
         view_menu.append_section(None, &v);
         ends.prepend(&scope_w);
-        // search help sits on the far side of "what to search"
-        ends.insert_child_after(&help_w, Some(&scope_w));
 
         // command bar, after Windows Explorer's Home ribbon, in two rows:
         //   New | Pin, Cut, Copy, Paste | Delete, Rename, Undo
@@ -579,14 +560,13 @@ impl Win {
         toasts.set_child(Some(&split));
         window.set_content(Some(&toasts));
 
-        // narrow windows: sidebar becomes an overlay, then the scope picker and help hide (Ctrl+F still scopes)
+        // narrow windows: sidebar becomes an overlay, then the scope picker hides (Ctrl+F still scopes)
         let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1000sp").unwrap());
         bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         window.add_breakpoint(bp);
         let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
         bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         bp.add_setter(&scope_w, "visible", Some(&false.to_value()));
-        bp.add_setter(&help_w, "visible", Some(&false.to_value()));
         window.add_breakpoint(bp);
 
         Win {

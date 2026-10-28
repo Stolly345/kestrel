@@ -841,9 +841,7 @@ def _():
 @test("search: the syntax cheat sheet opens")
 def _():
     start(D)
-    t = one("toggle button", "Search syntax")
-    if not activate(t):
-        click(t)
+    palette("search syntax")
     one(None, contains="wildcard")
 
 

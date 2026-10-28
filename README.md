@@ -52,7 +52,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Results while you type, across every local disk, USB drives included the moment they mount
 - Everything's query language: wildcards, `|` OR, `!` NOT, `<groups>`, `regex:`, `size:`, `dm:`, `ext:`, `dupe:`, `content:`…
 - Type-aware: `.deb` lists .deb files first; `pdf`, `word`, `excel`, `powerpoint` also find files of that type (`budget excel` finds `Budget.xlsx`)
-- Scope switch (Everywhere / This folder / This folder only), filter chips, match highlighting, recent and saved searches, a syntax cheat sheet one click away
+- Scope switch (Everywhere / This folder / This folder only), filter chips, match highlighting, recent and saved searches, a syntax cheat sheet in the menu
 - `ks`: the same search on the command line, like Everything's `es.exe`
 
 **File manager**
@@ -193,7 +193,7 @@ sudo apt install zip rar arj gcab xar wimtools msitools rpm genisoimage squashfs
 | `content:"TODO"` | text inside files (slower; read permission checked first) |
 | `regex:^\d{4}-` · `case:Readme` · `path:src/main` | regular expression, case-sensitive, full path |
 
-Press **?** next to the search box for the full cheat sheet, or run `ks --syntax`.
+Open **Search Syntax** from the menu (or the command palette, Ctrl+Shift+P) for the full cheat sheet, or run `ks --syntax`.
 
 ## Keyboard
 
