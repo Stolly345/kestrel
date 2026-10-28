@@ -67,7 +67,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
 - A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
-- New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type
+- New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type (change those in GNOME Files: right-click › Open With… › Always use for this file type, or `gio mime TYPE APP.desktop`)
 - Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview

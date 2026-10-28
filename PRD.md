@@ -67,6 +67,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 │ ‹  ›  ↑      ┌──────────────────────────────────────────────┐ [Everywhere ▾]   ▦ ≡ ⋮ │  ← header
 │              │ 🔍  Search files…   ext:pdf  size:>1mb     ✕ │                        │
 │              └──────────────────────────────────────────────┘                        │
+│ + New ▾  Open ▾  Select │ Undo  Redo │ Pin  Cut  Copy ▾  Paste ▾ │ Rename  Properties … │  ← command bar
 ├────────────┬─────────────────────────────────────────────────────────────┬────────────┤
 │ Places     │ ⌂ › Projects › kestrel                          [tab][tab]+ │  Preview   │  ← location bar
 │ Bookmarks  │─────────────────────────────────────────────────────────────│            │     per pane
@@ -81,6 +82,11 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **The search box is the header's centre widget.** It's always visible: 480 px minimum, 720 px maximum, centred, and taller and more prominent than a normal entry.
 - **The breadcrumb path moves out of the header** into a location bar at the top of each pane. With dual pane on, each pane has its own path. There's still only one search box, and it acts on the active pane.
 - **A scope selector** sits next to the search box: *Everywhere* / *This folder* / *This folder only (no subfolders)*. It shows plainly what's being searched. *This folder* uses `under:` and *This folder only* uses `parent:`, so you never have to type those.
+- **Command bar** (0.9.23–0.9.26) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
+  Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename, Properties | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's
+  order). Labelled buttons; one row from 1500 sp of bar width (a maximised window), two rows split between
+  Paste and Rename below that. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
+  Select's All / None / Invert show only while they apply.
 - **Focus on launch:** the search box has focus when a window opens. Esc clears it, a second Esc returns to the folder, and Down moves into the results.
 
 ### 6.2 Search ↔ browse model
@@ -102,15 +108,21 @@ What carries forward unchanged: the index engine, the query language, the daemon
 ### 6.4 Search assistance
 - **Autocomplete:** typing a modifier name (`ex` → `ext:`, `dm:` → today/yesterday/…) offers completions in a popover under the box.
 - **Recent and saved searches:** focusing the empty box shows the last 10 searches and your saved searches. Ctrl+D saves the current search, which then appears in the sidebar.
-- **Syntax help:** a "?" button in the box opens a cheat sheet popover. It's a popover, not a modal dialog.
-- **Debounce:** results update after a 75 ms typing pause. Pressing Enter commits the query to history.
+- **Syntax help:** ☰ → Search Syntax, or the command palette, opens the cheat sheet; `ks --syntax` prints it.
+  (A "?" button beside the box was removed in 0.9.27: it duplicated these and the placeholder shows an example.)
+- **Debounce:** results update after a 200 ms typing pause (75 ms until 0.9.22; a bare `.` or `*` waits for
+  more). Pressing Enter commits the query to history.
 
 ### 6.5 File manager (kept from v0.1, polished)
 - **Tabs:** drag tabs between panes and windows; session restore.
 - **Dual pane** (F3): F7 copies and F8 moves to the other pane.
 - **Views:** details, grid with thumbnails, columns.
 - **Preview pane** (Space or Alt+P).
-- **File operations:** copy, cut, paste interchangeable with Nautilus; trash; delete; rename; new folder; undo with a toast.
+- **File operations:** copy, cut, paste interchangeable with Nautilus; Paste as Link; trash; delete; rename;
+  undo with a toast, and redo (Ctrl+Shift+Z / Ctrl+Y).
+- **New ▾:** Folder, Shortcut to File / Folder | Text, Markdown | Word, Excel, PowerPoint | PDF. Documents are
+  real blank files and open at once in the default app for their type.
+- **Select mode:** a checkbox on every row/tile; ticking adds to the selection without clearing it.
 - **New:** a conflict dialog (Replace / Keep both / Skip, with "apply to all") instead of always auto-renaming.
 - **New:** inline rename (F2 edits in place) instead of a dialog.
 - **Context menu:** Open With, terminal here, tags, compress/extract, properties.
@@ -162,7 +174,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | ID | Requirement | Pri |
 |---|---|---|
 | F1 | Tabs, dual pane, three views, session restore | P0 (exists) |
-| F2 | Copy, move, trash, delete, rename, new folder, undo; clipboard compatible with Nautilus | P0 (exists) |
+| F2 | Copy, move, trash, delete, rename, new folder, undo and redo; clipboard compatible with Nautilus | P0 (exists) |
 | F3 | Conflict dialog: Replace / Keep both / Skip / Apply to all | P0 |
 | F4 | Inline rename in the list | P1 |
 | F5 | Drag and drop onto folders in the list and onto sidebar items, not just the empty background | P1 |
@@ -170,6 +182,10 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F7 | Git column and branch; colour tags; command palette; properties; archives | P1 (exists) |
 | F8 | Can be set as the default file manager (`inode/directory`) without breaking "Show in Folder" from other apps (D-Bus `org.freedesktop.FileManager1`) | P1 |
 | F9 | Custom tag names, not just the 7 fixed colours | P2 |
+| F10 | Command bar like Explorer's Home ribbon, one or two rows by available width | P1 (done 0.9.26) |
+| F11 | Select mode: checkboxes on items; All / None / Invert | P1 (done 0.9.25) |
+| F12 | New ▸ documents (txt, md, docx, xlsx, pptx, pdf) and shortcuts, opened in the default app | P1 (done 0.9.28) |
+| F13 | Open With ▸ Set as Default, so default apps can be changed without leaving Kestrel | P2 |
 
 ### 7.5 CLI
 - `ks` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
@@ -213,6 +229,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 
 ## 11. Decisions
 - 2026-10-25: search box **centred in the header**; default scope **Everywhere**.
+- 2026-10-27/28 (Alex): an Explorer-style **command bar**, labelled, in Alex's order (6.1); one row when it
+  fits, two otherwise. Properties has an info icon (the old one read as Settings). Move to / Copy to stay in
+  the palette only. The search "?" button goes (6.4).
+- 2026-10-28: **New ▸ order** (Claude chose it, at Alex's request): organising items first (Folder, Shortcuts), then plain text,
+  Office in its own order, PDF last (usually exported, rarely started blank).
 
 ## 11a. Status log
 - **M1 built (v0.2.0, 2026-10-25).** S1–S6, S8, S14, S15 done; location bar per tab; search on a worker thread.
