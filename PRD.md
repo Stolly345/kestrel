@@ -598,5 +598,5 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   bar's BreakpointBin that sets its CSS size class. One row measures 583 / 783 / 1081 px; the margins leave room
   for Extract or Select's All / None / Invert. Split-button arrows stay slim at the large size. ui-check
   covers large, compact and two rows.
-- **Fix after 0.9.31 (2026-10-28):** large size from 1250 sp (was 1140): with Select mode's three extra buttons
+- **v0.9.32 (2026-10-28): large command bar from 1250 sp** (was 1140): with Select mode's three extra buttons
   a large bar is ~1230 px, so at 1140 View was pushed off the end. Found by the README screenshots.
