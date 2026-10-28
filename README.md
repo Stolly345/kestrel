@@ -44,6 +44,12 @@ it happens, and pick out the one file you want the moment you ask for it.
 <td align="center"><sub>Search understands types: <code>.iso</code>, <code>pdf</code>, <code>excel</code></sub></td>
 <td align="center"><sub>Preview PDFs, Office documents, Markdown, media and archives</sub></td>
 </tr>
+<tr>
+<td colspan="2"><img src="docs/screenshots/select.png" alt="The command bar, and Select mode with checkboxes ticked on two invoices"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>A command bar like Explorer's, and Select mode: tick the files you want</sub></td>
+</tr>
 </table>
 
 ## Features
@@ -56,10 +62,12 @@ it happens, and pick out the one file you want the moment you ask for it.
 - `ks`: the same search on the command line, like Everything's `es.exe`
 
 **File manager**
+- A command bar like Windows Explorer's: New, Open, Select, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Properties, Compress, Extract, Delete, View. One row in a maximised window, two in a smaller one
+- Select mode: a checkbox on every file, so you can tick exactly the ones you want (All / None / Invert too)
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
 - A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
-- Copy, move, rename, undo; clipboard compatible with GNOME Files; drag and drop
+- Copy, move, rename, undo and redo; Paste as Link (symlinks); new folders and empty files; clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
 - Colour tags, git status column and branch, symlink badges, free-space bars on drives
@@ -207,6 +215,8 @@ Open **Search Syntax** from the menu (or the command palette, Ctrl+Shift+P) for 
 | Space or Alt+P | preview pane | Ctrl+\` | terminal panel |
 | F2 | rename (batch with several selected) | Alt+Return | properties |
 | Delete / Shift+Delete | trash / delete | Ctrl+Z | undo |
+| Ctrl+Shift+Z or Ctrl+Y | redo | Ctrl+Shift+N | new folder |
+| Ctrl+A / Ctrl+Shift+A | select all / none | Ctrl+Shift+I | invert selection |
 | Ctrl+Shift+P | command palette | Ctrl+, | preferences |
 | Ctrl+H | hidden files | F9 | sidebar |
 
@@ -221,15 +231,17 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   Extract produces. Samples live in `crates/kestrel/tests/fixtures/archives/` and are built by
   `scripts/make-archive-fixtures.sh`; a new extension fails the test until it has one.
   Per-format report: `cargo test -p kestrel every_format -- --nocapture`.
-- **`scripts/ui-check.sh`** drives the real app through 30 screens under a virtual display
+- **`scripts/ui-check.sh`** drives the real app through 35 screens under a virtual display
   (views, previews, dialogs, batch rename, terminal, search and its empty/off states, a folder
-  you can't open, Extract and its conflict prompt, Trash) with a throwaway home folder and its
+  you can't open, Extract and its conflict prompt, Trash, the command bar in one and two rows,
+  Select mode) with a throwaway home folder and its
   own small search service, checks 5 results along the way, fails on any GTK warning or error
   page, and saves every screen to `target/ui-check/`.
 - **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
   shortcuts through the accessibility layer under a virtual display, then checks the result on disk
-  and on screen. 50 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
-  copy/move/rename/trash/restore/delete and name clashes, batch rename, tags, search (typing, type
+  and on screen. 57 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
+  copy/move/rename/undo/redo/trash/restore/delete and name clashes, new files, Paste as Link, Select
+  mode and its checkboxes, batch rename, tags, search (typing, type
   ranking, scopes, tags, content, saved searches, the query language), previews, properties and
   checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and
   Show in Folder. Failures leave a screenshot and a dump of what was on screen in

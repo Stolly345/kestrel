@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # README screenshots: the real app on a made-up home folder ("maya", shown as ~/… so no temp path
-# appears), with its own search index. Writes docs/screenshots/{kestrel,search,preview}.png.
+# appears), with its own search index. Writes docs/screenshots/{kestrel,search,preview,select}.png.
 #
 #   scripts/screenshots.sh
 #
@@ -117,9 +117,10 @@ cd "$H"
 # a first visit makes the thumbnails; the real shots then show them straight away
 shot warmup "$H/Documents" >/dev/null
 rm -f "$out/warmup.png"
-shot kestrel --search aurora --select "Invoice 2026-10 Aurora Studio.pdf" --action preview
+shot kestrel --width 1400 --search aurora --select "Invoice 2026-10 Aurora Studio.pdf" --action preview
 shot search --search .iso
 shot preview "$H/Documents" --select "Kestrel Field Guide.pdf" --action preview
+shot select "$H/Documents" --width 1400 --action select-mode --select "Invoice 2026-09 Aurora Studio.pdf" --select "Invoice 2026-10 Aurora Studio.pdf"
 kill $IXD 2>/dev/null
 pkill -f "wsdd .*--listen $R/" 2>/dev/null || true
 echo "screenshots in docs/screenshots/"
