@@ -67,7 +67,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 │ ‹  ›  ↑      ┌──────────────────────────────────────────────┐ [Everywhere ▾]   ▦ ≡ ⋮ │  ← header
 │              │ 🔍  Search files…   ext:pdf  size:>1mb     ✕ │                        │
 │              └──────────────────────────────────────────────┘                        │
-│ + New ▾  Open ▾  Select │ Undo  Redo │ Pin  Cut  Copy ▾  Paste ▾ │ Rename  Properties … │  ← command bar
+│ +▾ 📂▾ ☑ │ ↶ ↷ │ 📌 ✂ ⧉▾ 📋▾ │ ✎ │ 📦 ⤓▾ │ 🗑▾ │ ▦▾   (icons; names in tooltips)      │  ← command bar
 ├────────────┬─────────────────────────────────────────────────────────────┬────────────┤
 │ Places     │ ⌂ › Projects › kestrel                          [tab][tab]+ │  Preview   │  ← location bar
 │ Bookmarks  │─────────────────────────────────────────────────────────────│            │     per pane
@@ -82,10 +82,11 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **The search box is the header's centre widget.** It's always visible: 480 px minimum, 720 px maximum, centred, and taller and more prominent than a normal entry.
 - **The breadcrumb path moves out of the header** into a location bar at the top of each pane. With dual pane on, each pane has its own path. There's still only one search box, and it acts on the active pane.
 - **A scope selector** sits next to the search box: *Everywhere* / *This folder* / *This folder only (no subfolders)*. It shows plainly what's being searched. *This folder* uses `under:` and *This folder only* uses `parent:`, so you never have to type those.
-- **Command bar** (0.9.23–0.9.26) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
-  Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename, Properties | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's
-  order). Labelled buttons; one row from 1500 sp of bar width (a maximised window), two rows split between
-  Paste and Rename below that. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
+- **Command bar** (0.9.23–0.9.30) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
+  Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's order).
+  Icons only (0.9.30): each button's name and shortcut is its tooltip and its accessible name. One row
+  from 880 sp of bar width, two rows split between Paste and Rename below that. **Properties** (ⓘ) sits
+  at the start of each pane's location bar, left of the home crumb: the selection, or the folder. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
   Select's All / None / Invert show only while they apply.
 - **Focus on launch:** the search box has focus when a window opens. Esc clears it, a second Esc returns to the folder, and Down moves into the results.
 
@@ -182,7 +183,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F7 | Git column and branch; colour tags; command palette; properties; archives | P1 (exists) |
 | F8 | Can be set as the default file manager (`inode/directory`) without breaking "Show in Folder" from other apps (D-Bus `org.freedesktop.FileManager1`) | P1 |
 | F9 | Custom tag names, not just the 7 fixed colours | P2 |
-| F10 | Command bar like Explorer's Home ribbon, one or two rows by available width | P1 (done 0.9.26) |
+| F10 | Command bar like Explorer's Home ribbon: icons with named tooltips, one or two rows by available width | P1 (done 0.9.30) |
 | F11 | Select mode: checkboxes on items; All / None / Invert | P1 (done 0.9.25) |
 | F12 | New ▸ documents (txt, md, docx, xlsx, pptx, pdf) and shortcuts, opened in the default app | P1 (done 0.9.28) |
 | F13 | Open With with "Always use for this file type", and Set Default App, so default apps can be changed without leaving Kestrel | P1 (done 0.9.29) |
@@ -232,6 +233,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 - 2026-10-27/28 (Alex): an Explorer-style **command bar**, labelled, in Alex's order (6.1); one row when it
   fits, two otherwise. Properties has an info icon (the old one read as Settings). Move to / Copy to stay in
   the palette only. The search "?" button goes (6.4).
+- 2026-10-28 (Alex): command bar **icons only**, names on hover; Properties moves to the location bar,
+  left of the home button.
 - 2026-10-28: **New ▸ order** (Claude chose it, at Alex's request): organising items first (Folder, Shortcuts), then plain text,
   Office in its own order, PDF last (usually exported, rarely started blank).
 
@@ -577,3 +580,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   `AppInfo::set_as_default_for_type`, i.e. ~/.config/mimeapps.list, where GNOME Files saves them. One click
   picks an app; a double-click or Enter also confirms (a single click confirming set defaults by accident).
   An empty file's type comes from its name (it sniffs as application/x-zerosize, which no app claims).
+- **v0.9.30 (2026-10-28): icon-only command bar; Properties in the location bar.** Every command-bar button is
+  an icon; its name and shortcut ("Cut (Ctrl+X)") is the tooltip and the accessible name (icon-only buttons
+  had no name for screen readers until then). Properties left the bar for an ⓘ button at the start of each
+  pane's location bar, left of the home crumb (the selection, or the folder). One row now fits from 880 sp
+  (was 1500). README screenshots retaken.

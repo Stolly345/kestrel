@@ -476,6 +476,15 @@ impl Browser {
             .propagate_natural_height(true)
             .build();
         let crumb_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // Properties of the selection, or of this folder when nothing is selected
+        crumb_row.append(
+            &gtk::Button::builder()
+                .icon_name("help-about-symbolic")
+                .action_name("win.properties")
+                .tooltip_text("Properties (Alt+Enter)")
+                .css_classes(["flat", "crumb"])
+                .build(),
+        );
         crumb_row.append(&loc_label);
         crumb_row.append(&crumb_scroll);
         let loc_entry = gtk::Entry::builder()

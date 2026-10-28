@@ -81,10 +81,10 @@ pub fn new_menu() -> gio::Menu {
     m
 }
 
-/// Command-bar width (sp) from which it fits on one row; narrower, it takes two. The rows measure
-/// 870 + 613 px with every label (Extract and the Select buttons only add while shown, and scroll if
-/// they don't fit): a maximised 1920 px window with the sidebar open gives the bar ~1640.
-const ONE_ROW_WIDTH: u32 = 1500;
+/// Command-bar width (sp) from which it fits on one row; narrower, it takes two. Icons only, the rows
+/// measure 510 + 337 px (Extract and the Select buttons only add while shown, and scroll if they don't
+/// fit), so a normal window has one row and only a narrow one (or one with the preview pane open) two.
+const ONE_ROW_WIDTH: u32 = 880;
 
 pub struct Pane {
     pub root: gtk::Box,
@@ -422,10 +422,11 @@ impl Win {
         view_menu.append_section(None, &v);
         ends.prepend(&scope_w);
 
-        // command bar, after Windows Explorer's Home ribbon, in two rows:
-        //   New | Pin, Cut, Copy, Paste | Delete, Rename, Undo
-        //   Compress, Extract | Open, Properties | Select (checkboxes) | View
+        // command bar, after Windows Explorer's Home ribbon (Alex's order), icons only with each name
+        // (and shortcut) as its tooltip:
+        //   New, Open, Select | Undo, Redo | Pin, Cut, Copy, Paste ‖ Rename | Compress, Extract | Delete | View
         // Buttons follow their actions, so update_actions greys them out to suit the selection.
+        // Properties lives at the start of each pane's location bar.
         let rows = [
             gtk::Box::builder().spacing(2).css_classes(["toolbar"]).build(),
             gtk::Box::builder().spacing(2).css_classes(["toolbar"]).build(),
@@ -437,27 +438,26 @@ impl Win {
             }
             m
         };
-        let labelled = |icon: &str, label: &str| adw::ButtonContent::builder().icon_name(icon).label(label).build();
+        // icons only: the tooltip is also the accessible name, so screen readers say "Cut (Ctrl+X)"
+        let named = |w: &gtk::Widget, tip: &str| {
+            w.set_tooltip_text(Some(tip));
+            w.update_property(&[gtk::accessible::Property::Label(tip)]);
+        };
         let sep = || gtk::Separator::new(gtk::Orientation::Vertical);
-        let button = |icon: &str, label: &str, action: &str, tip: &str| {
-            gtk::Button::builder().child(&labelled(icon, label)).action_name(action).tooltip_text(tip).build()
+        let button = |icon: &str, action: &str, tip: &str| {
+            let b = gtk::Button::builder().icon_name(icon).action_name(action).build();
+            named(b.upcast_ref(), tip);
+            b
         };
-        let menu_btn = |icon: &str, label: &str, m: &gio::Menu| {
-            gtk::MenuButton::builder()
-                .child(&labelled(icon, label))
-                .menu_model(m)
-                .tooltip_text(label)
-                .always_show_arrow(true)
-                .build()
+        let menu_btn = |icon: &str, tip: &str, m: &gio::Menu| {
+            let b = gtk::MenuButton::builder().icon_name(icon).menu_model(m).always_show_arrow(true).build();
+            named(b.upcast_ref(), tip);
+            b
         };
-        let split_btn = |icon: &str, label: &str, action: &str, tip: &str, m: &gio::Menu| {
-            adw::SplitButton::builder()
-                .child(&labelled(icon, label))
-                .action_name(action)
-                .tooltip_text(tip)
-                .dropdown_tooltip(format!("More {}", label.to_lowercase()))
-                .menu_model(m)
-                .build()
+        let split_btn = |icon: &str, action: &str, tip: &str, more: &str, m: &gio::Menu| {
+            let b = adw::SplitButton::builder().icon_name(icon).action_name(action).dropdown_tooltip(more).menu_model(m).build();
+            named(b.upcast_ref(), tip);
+            b
         };
         // contextual buttons are shown only while they apply
         let contextual = |w: &gtk::Widget| _ = w.bind_property("sensitive", w, "visible").sync_create().build();
@@ -476,47 +476,50 @@ impl Win {
             ]),
         ));
         // Select: checkboxes on every item; All / None / Invert while it's on
-        let select = gtk::ToggleButton::builder()
-            .child(&labelled("selection-mode-symbolic", "Select"))
-            .action_name("win.select-mode")
-            .tooltip_text("Checkboxes to pick files")
-            .build();
+        let select = gtk::ToggleButton::builder().icon_name("selection-mode-symbolic").action_name("win.select-mode").build();
+        named(select.upcast_ref(), "Select (checkboxes)");
         r.append(&select);
-        for (label, action, tip) in [
-            ("All", "win.select-all", "Select all (Ctrl+A)"),
-            ("None", "win.select-none", "Select none (Ctrl+Shift+A)"),
-            ("Invert", "win.invert-selection", "Invert selection (Ctrl+Shift+I)"),
+        for (icon, action, tip) in [
+            ("edit-select-all-symbolic", "win.select-all", "Select all (Ctrl+A)"),
+            ("edit-clear-all-symbolic", "win.select-none", "Select none (Ctrl+Shift+A)"),
+            ("object-flip-horizontal-symbolic", "win.invert-selection", "Invert selection (Ctrl+Shift+I)"),
         ] {
-            let b = gtk::Button::builder().label(label).action_name(action).tooltip_text(tip).css_classes(["flat"]).build();
+            let b = gtk::Button::builder().icon_name(icon).action_name(action).css_classes(["flat"]).build();
+            named(b.upcast_ref(), tip);
             select.bind_property("active", &b, "visible").sync_create().build();
             r.append(&b);
         }
         r.append(&sep());
-        r.append(&button("edit-undo-symbolic", "Undo", "win.undo", "Undo (Ctrl+Z)"));
-        r.append(&button("edit-redo-symbolic", "Redo", "win.redo", "Redo (Ctrl+Shift+Z)"));
+        r.append(&button("edit-undo-symbolic", "win.undo", "Undo (Ctrl+Z)"));
+        r.append(&button("edit-redo-symbolic", "win.redo", "Redo (Ctrl+Shift+Z)"));
         r.append(&sep());
-        r.append(&button("view-pin-symbolic", "Pin", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)"));
-        r.append(&button("edit-cut-symbolic", "Cut", "win.cut", "Cut (Ctrl+X)"));
-        r.append(&split_btn("edit-copy-symbolic", "Copy", "win.copy", "Copy (Ctrl+C)", &menu(&[("Copy", "win.copy"), ("Copy Path", "win.copy-path")])));
+        r.append(&button("view-pin-symbolic", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)"));
+        r.append(&button("edit-cut-symbolic", "win.cut", "Cut (Ctrl+X)"));
+        r.append(&split_btn(
+            "edit-copy-symbolic",
+            "win.copy",
+            "Copy (Ctrl+C)",
+            "Copy options",
+            &menu(&[("Copy", "win.copy"), ("Copy Path", "win.copy-path")]),
+        ));
         r.append(&split_btn(
             "edit-paste-symbolic",
-            "Paste",
             "win.paste",
             "Paste (Ctrl+V)",
+            "Paste options",
             &menu(&[("Paste", "win.paste"), ("Paste as Link", "win.paste-link")]),
         ));
 
         let r = &rows[1];
-        r.append(&button("document-edit-symbolic", "Rename", "win.rename", "Rename (F2)"));
-        r.append(&button("help-about-symbolic", "Properties", "win.properties", "Properties (Alt+Enter)"));
+        r.append(&button("document-edit-symbolic", "win.rename", "Rename (F2)"));
         r.append(&sep());
         // Archive: Compress always; Extract while an archive is selected (Explorer's Extract tab)
-        r.append(&button("package-x-generic-symbolic", "Compress", "win.compress", "Compress into a zip, 7z or tar…"));
+        r.append(&button("package-x-generic-symbolic", "win.compress", "Compress into a zip, 7z or tar…"));
         let extract = split_btn(
             "folder-download-symbolic",
-            "Extract",
             "win.extract",
             "Extract Here",
+            "Extract options",
             &menu(&[("Extract Here", "win.extract"), ("Extract To…", "win.extract-to"), ("Browse Archive", "win.browse-archive")]),
         );
         // a split button stays sensitive itself (only its inner button greys), so follow the action
@@ -527,16 +530,16 @@ impl Win {
         // destructive, so on its own
         r.append(&split_btn(
             "user-trash-symbolic",
-            "Delete",
             "win.trash",
             "Move to Trash (Delete)",
+            "Delete options",
             &menu(&[("Move to Trash", "win.trash"), ("Delete Permanently", "win.delete")]),
         ));
         for (icon, label, action) in [
             ("edit-undo-symbolic", "Restore", "win.restore"),
             ("user-trash-full-symbolic", "Empty Trash…", "win.empty-trash"),
         ] {
-            let b = gtk::Button::builder().child(&labelled(icon, label)).action_name(action).build();
+            let b = button(icon, action, label);
             contextual(b.upcast_ref());
             r.append(&b);
         }

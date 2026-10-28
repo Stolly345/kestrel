@@ -617,7 +617,7 @@ def _():
     key("Control_L", "Shift_L", "z")
     eventually(lambda: exists("holiday photo.txt") and not exists("IMG_0001.txt"), "redone")
     key("Control_L", "z"); eventually(lambda: exists("IMG_0001.txt"), "undone again")
-    press_button("Redo")
+    press_button(None, contains="Redo (")
     eventually(lambda: exists("holiday photo.txt"), "redone from the command bar")
 
 
@@ -714,6 +714,18 @@ def _():
     pick_app("FT Open"); press_button("Open")
     eventually(lambda: os.path.exists(out) and "notes.md" in open(out).read(), "opened in FT Open")
     eventually(lambda: "text/markdown=ft-open.desktop" in default(), "FT Open the default again")
+
+
+@test("command bar: icons only, each named by its tooltip; Properties sits in the location bar")
+def _():
+    start(D)
+    for tip in ["Cut (Ctrl+X)", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "Undo (Ctrl+Z)", "Redo (Ctrl+Shift+Z)",
+                "Rename (F2)", "Pin to the sidebar (Ctrl+D)", "Move to Trash (Delete)", "New", "Open", "View"]:
+        one(None, tip)
+    assert not [n for n in all_("label") if n.get_name() in ("Cut", "Paste", "Rename")], "a word shows on the bar"
+    select("notes.md")
+    press_button("Properties (Alt+Enter)")
+    one(None, contains="Markdown document")
 
 
 @test("files: Paste as Link makes a symlink")
