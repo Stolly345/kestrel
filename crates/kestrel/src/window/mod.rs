@@ -83,8 +83,9 @@ pub fn new_menu() -> gio::Menu {
 
 /// Command-bar sizes by the bar's own width (sp), smallest first: (from this width, CSS size class).
 /// Below the first: two compact rows. One row measures 583 px compact, 783 normal, 1081 large; each
-/// step adds ~50 for Extract or Select's All / None / Invert (anything that still doesn't fit scrolls).
-const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1140, "large")];
+/// step leaves room for Extract or Select's All / None / Invert (three more buttons: ~150 px large, so
+/// at 1140 Select mode pushed View off the end; anything that still doesn't fit scrolls).
+const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1250, "large")];
 
 pub struct Pane {
     pub root: gtk::Box,

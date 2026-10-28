@@ -85,7 +85,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **Command bar** (0.9.23–0.9.30) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
   Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's order).
   Icons only (0.9.30): each button's name and shortcut is its tooltip and its accessible name. Sizes by
-  the bar's own width (0.9.31, `BAR_SIZES`): large (20 px icons) from 1140 sp, normal from 840, compact
+  the bar's own width (0.9.31, `BAR_SIZES`): large (20 px icons) from 1250 sp, normal from 840, compact
   from 630, all one row; below that two compact rows split between Paste and Rename. **Properties** (ⓘ) sits
   at the start of each pane's location bar, left of the home crumb: the selection, or the folder. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
   Select's All / None / Invert show only while they apply.
@@ -598,3 +598,5 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   bar's BreakpointBin that sets its CSS size class. One row measures 583 / 783 / 1081 px; the margins leave room
   for Extract or Select's All / None / Invert. Split-button arrows stay slim at the large size. ui-check
   covers large, compact and two rows.
+- **Fix after 0.9.31 (2026-10-28):** large size from 1250 sp (was 1140): with Select mode's three extra buttons
+  a large bar is ~1230 px, so at 1140 View was pushed off the end. Found by the README screenshots.
