@@ -93,6 +93,20 @@ fn du(f: &gio::File) -> u64 {
     }
 }
 
+/// Drop items inside another selected folder (and repeats). A search through subfolders can list a
+/// folder and files in it: trashing, deleting or moving the folder takes them along, so acting on
+/// them again would fail with "it isn't there any more".
+// ponytail: O(n²) prefix checks; fine for a selection, sort by path if someone selects 100k results
+pub fn outermost(files: Vec<gio::File>) -> Vec<gio::File> {
+    let mut out: Vec<gio::File> = Vec::new();
+    for f in &files {
+        if !files.iter().any(|g| f.has_prefix(g)) && !out.iter().any(|o| o.equal(f)) {
+            out.push(f.clone());
+        }
+    }
+    out
+}
+
 /// `dir/name`, or `dir/name (2).ext`, `(3)`… if taken. Never overwrites.
 pub fn unique_child(dir: &gio::File, name: &str) -> gio::File {
     let first = dir.child(name);
@@ -604,6 +618,7 @@ impl Ops {
 
     /// Copy/move, asking once what to do if names already exist at the destination.
     pub fn transfer(self: &Rc<Self>, op: Op, srcs: Vec<gio::File>, dest: gio::File) {
+        let srcs = if op == Op::Move { outermost(srcs) } else { srcs };
         if srcs.is_empty() {
             return;
         }
@@ -725,6 +740,7 @@ impl Ops {
     }
 
     pub fn trash(self: &Rc<Self>, files: Vec<gio::File>) {
+        let files = outermost(files);
         if files.is_empty() {
             return;
         }
@@ -757,6 +773,7 @@ impl Ops {
 
     /// Permanent delete, after confirmation.
     pub fn delete(self: &Rc<Self>, files: Vec<gio::File>) {
+        let files = outermost(files);
         if files.is_empty() {
             return;
         }
@@ -931,14 +948,27 @@ impl Ops {
         });
     }
 
-    pub fn new_file(self: &Rc<Self>, dir: gio::File) {
-        let me = self.clone();
-        self.ask_name("New File", "Create", "New Document.txt", move |name| {
-            let f = dir.child(&name);
+    /// New ▸ a document: ask its name, write `contents` (never over an existing file), then `done`
+    /// with it (the caller opens it in its default app).
+    pub fn new_document(self: &Rc<Self>, dir: gio::File, kind: &str, name: &str, contents: &'static [u8], done: impl Fn(gio::File) + 'static) {
+        let (me, done) = (self.clone(), Rc::new(done));
+        self.ask_name(&format!("New {kind}"), "Create", name, move |name| {
+            let (f, done) = (dir.child(&name), done.clone());
             me.bg(
-                move || f.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE).map(|_| f).map_err(|e| crate::browser::human_gio(&e)),
-                |me, r| match r {
-                    Ok(f) => me.record(Undo::Created(f)),
+                move || {
+                    let write = || -> Result<(), glib::Error> {
+                        let s = f.create(gio::FileCreateFlags::NONE, gio::Cancellable::NONE)?;
+                        s.write_all(contents, gio::Cancellable::NONE)?;
+                        s.close(gio::Cancellable::NONE)?;
+                        Ok(())
+                    };
+                    write().map(|_| f).map_err(|e| crate::browser::human_gio(&e))
+                },
+                move |me, r| match r {
+                    Ok(f) => {
+                        me.record(Undo::Created(f.clone()));
+                        done(f);
+                    }
                     Err(e) => me.toast(&e),
                 },
             );
@@ -1302,6 +1332,14 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dst.child("a.txt").path().unwrap()).unwrap(), "aaaa");
         delete_tree(&d).unwrap();
         assert!(!exists(&d));
+    }
+
+    #[test]
+    fn outermost_drops_items_inside_selected_folders() {
+        let f = |p: &str| gio::File::for_path(p);
+        let got = outermost(vec![f("/a/b/c.txt"), f("/a/b"), f("/a/bc"), f("/x.txt"), f("/x.txt")]);
+        let paths: Vec<_> = got.iter().map(|g| g.path().unwrap()).collect();
+        assert_eq!(paths, [std::path::PathBuf::from("/a/b"), "/a/bc".into(), "/x.txt".into()]);
     }
 
     #[test]

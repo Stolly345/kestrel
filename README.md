@@ -67,7 +67,8 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
 - A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
-- Copy, move, rename, undo and redo; Paste as Link (symlinks); new folders and empty files; clipboard compatible with GNOME Files; drag and drop
+- New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type
+- Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
 - Colour tags, git status column and branch, symlink badges, free-space bars on drives
@@ -240,7 +241,7 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
 - **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
   shortcuts through the accessibility layer under a virtual display, then checks the result on disk
   and on screen. 57 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
-  copy/move/rename/undo/redo/trash/restore/delete and name clashes, new files, Paste as Link, Select
+  copy/move/rename/undo/redo/trash/restore/delete and name clashes, New documents opening in their apps, Paste as Link, Select
   mode and its checkboxes, batch rename, tags, search (typing, type
   ranking, scopes, tags, content, saved searches, the query language), previews, properties and
   checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and

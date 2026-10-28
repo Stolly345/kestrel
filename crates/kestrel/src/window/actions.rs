@@ -131,10 +131,25 @@ impl Win {
             Some(d) => w.ops.new_folder(d),
             None => w.ops.toast("Open a folder first"),
         });
-        self.act("new-file", |w| match w.current().and_then(|b| b.dir()) {
-            Some(d) => w.ops.new_file(d),
-            None => w.ops.toast("Open a folder first"),
-        });
+        // Explorer's New ▸ Shortcut: a symlink to a file or folder picked in a dialog
+        for (name, folder) in [("new-shortcut-file", false), ("new-shortcut-folder", true)] {
+            self.act(name, move |w| {
+                let Some(dir) = w.current().and_then(|b| b.dir()) else { return };
+                let fd = gtk::FileDialog::builder().title("Shortcut To").accept_label("Make Shortcut").modal(true).build();
+                fd.set_initial_folder(Some(&dir));
+                let ops = w.ops.clone();
+                let made = move |r: Result<gio::File, glib::Error>| {
+                    if let Ok(target) = r {
+                        ops.link(vec![target], dir.clone());
+                    }
+                };
+                if folder {
+                    fd.select_folder(Some(&w.window), gio::Cancellable::NONE, made);
+                } else {
+                    fd.open(Some(&w.window), gio::Cancellable::NONE, made);
+                }
+            });
+        }
         self.act("undo", |w| w.ops.undo());
         self.act("redo", |w| w.ops.redo());
         self.act("copy-path", |w| {
@@ -294,6 +309,38 @@ impl Win {
                 w.navigate(crate::archive::archive_root(&f));
             }
         });
+        // New ▸ a document (see NEW_DOCS): made from a blank template, then opened in its default app
+        let me = self.me.clone();
+        let a = gio::SimpleAction::new("new-doc", Some(glib::VariantTy::STRING));
+        a.connect_activate(move |_, v| {
+            let (Some(w), Some(id)) = (me.upgrade(), v.and_then(|v| v.get::<String>())) else { return };
+            let (Some(b), Some(&(_, kind, name, contents))) = (w.current(), super::NEW_DOCS.iter().find(|d| d.0 == id)) else {
+                return;
+            };
+            let Some(dir) = b.dir() else { return };
+            let bw = Rc::downgrade(&b);
+            let ops = w.ops.clone();
+            w.ops.new_document(dir, kind, name, contents, move |f| {
+                // by the name's type: an empty file sniffs as "application/x-zerosize", which no
+                // editor claims. Nothing set for the type: let the person choose.
+                let name = f.basename().unwrap_or_default();
+                let (ct, _) = gio::content_type_guess(Some(&name), None::<&[u8]>);
+                let launched = gio::AppInfo::default_for_type(&ct, false).map(|app| {
+                    let ctx = gtk::prelude::WidgetExt::display(&ops.toasts).app_launch_context();
+                    app.launch(&[f.clone()], Some(&ctx))
+                });
+                match launched {
+                    Some(Ok(())) => {}
+                    Some(Err(e)) => ops.toast(&crate::browser::human_gio(&e)),
+                    None => {
+                        if let Some(b) = bw.upgrade() {
+                            b.launch(&f, true);
+                        }
+                    }
+                }
+            });
+        });
+        self.window.add_action(&a);
         let me = self.me.clone();
         let a = gio::SimpleAction::new("script", Some(glib::VariantTy::STRING));
         a.connect_activate(move |_, v| {

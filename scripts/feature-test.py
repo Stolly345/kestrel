@@ -637,16 +637,44 @@ def palette(cmd):
     set_text(e, cmd); key("Return")
 
 
-@test("files: New > Empty File from the command bar")
-def _():
-    start(D)
+def fake_default_app(*mimes):
+    """Register an app that writes the path it was given to ~/opened; the default for `mimes`."""
+    apps = os.path.join(HOME, ".local/share/applications")
+    os.makedirs(apps, exist_ok=True)
+    os.makedirs(os.path.join(HOME, ".config"), exist_ok=True)
+    open(os.path.join(apps, "ft-open.desktop"), "w").write(
+        "[Desktop Entry]\nType=Application\nName=FT Open\nExec=sh -c 'echo %f > \"$HOME/opened\"'\nMimeType=" + ";".join(mimes) + ";\n")
+    open(os.path.join(HOME, ".config/mimeapps.list"), "w").write(
+        "[Default Applications]\n" + "".join(f"{m}=ft-open.desktop\n" for m in mimes))
+    out = os.path.join(HOME, "opened")
+    if os.path.exists(out):
+        os.unlink(out)
+    return out
+
+
+def new_from_menu(item, default_name, name):
     t = one("toggle button", "New")
     if not activate(t):
         click(t)
-    pick("Empty File…")
-    e = wait(lambda: [x for x in all_("text") + all_("entry") if text_of(x) == "New Document.txt"][0], "the name field")
-    set_text(e, "fresh.txt"); key("Return")
-    eventually(lambda: os.path.isfile(os.path.join(D, "fresh.txt")), "the file on disk")
+    pick(item)
+    e = wait(lambda: [x for x in all_("text") + all_("entry") if text_of(x) == default_name][0], "the name field")
+    set_text(e, name); key("Return")
+
+
+@test("files: New > Markdown / Word make the file and open it in its default app")
+def _():
+    docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    out = fake_default_app("text/markdown", docx)
+    start(D)
+    new_from_menu("Markdown Document…", "New Document.md", "plan.md")
+    eventually(lambda: os.path.isfile(os.path.join(D, "plan.md")), "the file on disk")
+    eventually(lambda: os.path.exists(out) and "plan.md" in open(out).read(), "opened in the default app")
+    os.unlink(out)
+    new_from_menu("Word Document…", "New Document.docx", "letter.docx")
+    p = os.path.join(D, "letter.docx")
+    eventually(lambda: os.path.exists(out) and "letter.docx" in open(out).read(), "Word document opened")
+    import zipfile
+    assert "word/document.xml" in zipfile.ZipFile(p).namelist(), "not a real .docx"
 
 
 @test("files: Paste as Link makes a symlink")
@@ -806,6 +834,20 @@ def _():
     key("Escape"); key("Escape")
     key("Control_L", "f"); typ("IMG")
     eventually(lambda: all_(None, "No results"), "no IMG files under Projects")
+
+
+@test("search: trashing a found folder and a found file inside it trashes once, no error")
+def _():
+    os.makedirs(os.path.join(D, "Projects/kite"))
+    open(os.path.join(D, "Projects/kite/kite-notes.txt"), "w").write("x\n")
+    index(); start(os.path.join(D, "Projects"))
+    key("Control_L", "f"); typ("kite")
+    eventually(lambda: sorted(names()) == ["kite", "kite-notes.txt"], "the folder and the file in it")
+    select("kite", "kite-notes.txt"); key("Delete")
+    eventually(lambda: not exists("Projects/kite") and os.path.isdir(os.path.join(TRASH, "kite")), "the folder in the trash")
+    time.sleep(1)
+    bad = [n.get_name() for n in all_() if "Couldn't" in (n.get_name() or "")]
+    assert not bad, bad
 
 
 @test("search: tag search from the sidebar dots")

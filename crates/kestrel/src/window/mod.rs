@@ -50,6 +50,37 @@ pub fn load_session() -> Option<Session> {
     serde_json::from_str(&std::fs::read_to_string(session_file()).ok()?).ok()
 }
 
+/// New ▸ documents: (action target, what it is, suggested name, blank contents). The order: plain text
+/// first (written in most often, straight away), then Office in its own order, PDF last (usually
+/// exported, rarely started blank). Office/PDF blanks come from scripts/make-templates.sh.
+pub const NEW_DOCS: &[(&str, &str, &str, &[u8])] = &[
+    ("txt", "Text Document", "New Document.txt", b""),
+    ("md", "Markdown Document", "New Document.md", b""),
+    ("docx", "Word Document", "New Document.docx", include_bytes!("../../../../packaging/templates/blank.docx")),
+    ("xlsx", "Excel Spreadsheet", "New Spreadsheet.xlsx", include_bytes!("../../../../packaging/templates/blank.xlsx")),
+    ("pptx", "PowerPoint Presentation", "New Presentation.pptx", include_bytes!("../../../../packaging/templates/blank.pptx")),
+    ("pdf", "PDF Document", "New Document.pdf", include_bytes!("../../../../packaging/templates/blank.pdf")),
+];
+
+/// The New menu: folder and shortcuts (they organise, rather than hold content), then NEW_DOCS in
+/// three sections: plain text, Office, PDF.
+pub fn new_menu() -> gio::Menu {
+    let m = gio::Menu::new();
+    let s = gio::Menu::new();
+    s.append(Some("Folder…"), Some("win.new-folder"));
+    s.append(Some("Shortcut to File…"), Some("win.new-shortcut-file"));
+    s.append(Some("Shortcut to Folder…"), Some("win.new-shortcut-folder"));
+    m.append_section(None, &s);
+    for ids in [&["txt", "md"][..], &["docx", "xlsx", "pptx"], &["pdf"]] {
+        let s = gio::Menu::new();
+        for (id, kind, _, _) in NEW_DOCS.iter().filter(|d| ids.contains(&d.0)) {
+            s.append(Some(&format!("{kind}…")), Some(&format!("win.new-doc::{id}")));
+        }
+        m.append_section(None, &s);
+    }
+    m
+}
+
 /// Command-bar width (sp) from which it fits on one row; narrower, it takes two. The rows measure
 /// 870 + 613 px with every label (Extract and the Select buttons only add while shown, and scroll if
 /// they don't fit): a maximised 1920 px window with the sidebar open gives the bar ~1640.
@@ -165,8 +196,7 @@ fn menus() -> (gio::Menu, gio::Menu) {
 
     let bg = gio::Menu::new();
     let s = gio::Menu::new();
-    s.append(Some("New Folder…"), Some("win.new-folder"));
-    s.append(Some("New File…"), Some("win.new-file"));
+    s.append_submenu(Some("New"), &new_menu());
     s.append(Some("Paste"), Some("win.paste"));
     s.append(Some("Empty Trash…"), Some("win.empty-trash"));
     bg.append_section(None, &s);
@@ -432,7 +462,7 @@ impl Win {
         let contextual = |w: &gtk::Widget| _ = w.bind_property("sensitive", w, "visible").sync_create().build();
 
         let r = &rows[0];
-        r.append(&menu_btn("list-add-symbolic", "New", &menu(&[("Folder…", "win.new-folder"), ("Empty File…", "win.new-file")])));
+        r.append(&menu_btn("list-add-symbolic", "New", &new_menu()));
         r.append(&menu_btn(
             "document-open-symbolic",
             "Open",
@@ -747,7 +777,9 @@ impl Win {
             ("copy-to", any),
             ("move-to", any && !trash),
             ("new-folder", in_dir),
-            ("new-file", in_dir),
+            ("new-doc", in_dir),
+            ("new-shortcut-file", in_dir),
+            ("new-shortcut-folder", in_dir),
         ] {
             if let Some(a) = self.window.lookup_action(name).and_downcast::<gio::SimpleAction>() {
                 a.set_enabled(on);

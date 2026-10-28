@@ -540,3 +540,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   ui-check's SCREEN= for wide screenshots.
 - **v0.9.27 (2026-10-28): no search-help button.** The "?" beside the search box is gone (Yaru drew it oddly,
   and it duplicated ☰ → Search Syntax, the palette and `ks --syntax`; the placeholder already shows an example).
+- **v0.9.28 (2026-10-28): New ▸ documents and shortcuts; trashing search results fixed.** New menu: Folder,
+  Shortcut to File…, Shortcut to Folder… | Text, Markdown | Word, Excel, PowerPoint | PDF (organising items
+  first, then plain text, Office in its own order, PDF last as it's rarely started blank). Office and PDF are
+  real blank files (packaging/templates, made by scripts/make-templates.sh, built in with include_bytes!) and
+  open in the default app for the name's type: an empty file sniffs as application/x-zerosize, which no
+  editor claims; no default → the app chooser. Shortcuts are symlinks (undoable). The background menu has the
+  same New submenu. Fix: a search through subfolders can list a folder and files in it; trash / delete / move
+  of both reported "it isn't there any more" after the folder took them along (fileops::outermost). Also: a
+  search tab selects (--select, Show in Folder) even when the results arrived first.
