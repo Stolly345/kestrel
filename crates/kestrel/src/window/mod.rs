@@ -83,9 +83,8 @@ pub fn new_menu() -> gio::Menu {
 
 /// Command-bar sizes by the bar's own width (sp), smallest first: (from this width, CSS size class).
 /// Below the first: two compact rows. One row measures 583 px compact, 783 normal, 1081 large; each
-/// step leaves room for Extract or Select's All / None / Invert (three more buttons: ~150 px large, so
-/// at 1140 Select mode pushed View off the end; anything that still doesn't fit scrolls).
-const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1250, "large")];
+/// step leaves room for Extract; anything that still doesn't fit scrolls.
+const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1140, "large")];
 
 pub struct Pane {
     pub root: gtk::Box,
@@ -425,9 +424,9 @@ impl Win {
 
         // command bar, after Windows Explorer's Home ribbon (Alex's order), icons only with each name
         // (and shortcut) as its tooltip:
-        //   New, Open, Select | Undo, Redo | Pin, Cut, Copy, Paste ‖ Rename | Compress, Extract | Delete | View
+        //   New, Open | Undo, Redo | Pin, Cut, Copy, Paste ‖ Rename | Compress, Extract | Delete | View
         // Buttons follow their actions, so update_actions greys them out to suit the selection.
-        // Properties lives at the start of each pane's location bar.
+        // Select and Properties live at the start of each pane's location bar.
         let rows = [
             gtk::Box::builder().spacing(2).css_classes(["toolbar"]).build(),
             gtk::Box::builder().spacing(2).css_classes(["toolbar"]).build(),
@@ -476,20 +475,6 @@ impl Win {
                 ("Open in Terminal", "win.terminal"),
             ]),
         ));
-        // Select: checkboxes on every item; All / None / Invert while it's on
-        let select = gtk::ToggleButton::builder().icon_name("selection-mode-symbolic").action_name("win.select-mode").build();
-        named(select.upcast_ref(), "Select (checkboxes)");
-        r.append(&select);
-        for (icon, action, tip) in [
-            ("edit-select-all-symbolic", "win.select-all", "Select all (Ctrl+A)"),
-            ("edit-clear-all-symbolic", "win.select-none", "Select none (Ctrl+Shift+A)"),
-            ("object-flip-horizontal-symbolic", "win.invert-selection", "Invert selection (Ctrl+Shift+I)"),
-        ] {
-            let b = gtk::Button::builder().icon_name(icon).action_name(action).css_classes(["flat"]).build();
-            named(b.upcast_ref(), tip);
-            select.bind_property("active", &b, "visible").sync_create().build();
-            r.append(&b);
-        }
         r.append(&sep());
         r.append(&button("edit-undo-symbolic", "win.undo", "Undo (Ctrl+Z)"));
         r.append(&button("edit-redo-symbolic", "win.redo", "Redo (Ctrl+Shift+Z)"));

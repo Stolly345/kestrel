@@ -82,13 +82,14 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **The search box is the header's centre widget.** It's always visible: 480 px minimum, 720 px maximum, centred, and taller and more prominent than a normal entry.
 - **The breadcrumb path moves out of the header** into a location bar at the top of each pane. With dual pane on, each pane has its own path. There's still only one search box, and it acts on the active pane.
 - **A scope selector** sits next to the search box: *Everywhere* / *This folder* / *This folder only (no subfolders)*. It shows plainly what's being searched. *This folder* uses `under:` and *This folder only* uses `parent:`, so you never have to type those.
-- **Command bar** (0.9.23–0.9.30) under the header, after Windows Explorer's: New ▾, Open ▾, Select | Undo,
+- **Command bar** (0.9.23–0.9.33) under the header, after Windows Explorer's: New ▾, Open ▾ | Undo,
   Redo | Pin, Cut, Copy ▾, Paste ▾ | Rename | Compress, Extract ▾ | Delete ▾ | View ▾ (Alex's order).
   Icons only (0.9.30): each button's name and shortcut is its tooltip and its accessible name. Sizes by
-  the bar's own width (0.9.31, `BAR_SIZES`): large (20 px icons) from 1250 sp, normal from 840, compact
-  from 630, all one row; below that two compact rows split between Paste and Rename. **Properties** (ⓘ) sits
-  at the start of each pane's location bar, left of the home crumb: the selection, or the folder. Buttons grey out to suit the selection; Extract, Restore, Empty Trash and
-  Select's All / None / Invert show only while they apply.
+  the bar's own width (0.9.31, `BAR_SIZES`): large (20 px icons) from 1140 sp, normal from 840, compact
+  from 630, all one row; below that two compact rows split between Paste and Rename. **Select** (☑, with
+  All / None / Invert beside it while on) and **Properties** (ⓘ) sit at the start of each pane's location
+  bar, left of the home crumb (0.9.33); Properties acts on the selection, or the folder. Buttons grey out to
+  suit the selection; Extract, Restore and Empty Trash show only while they apply.
 - **Focus on launch:** the search box has focus when a window opens. Esc clears it, a second Esc returns to the folder, and Down moves into the results.
 
 ### 6.2 Search ↔ browse model
@@ -600,3 +601,6 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   covers large, compact and two rows.
 - **v0.9.32 (2026-10-28): large command bar from 1250 sp** (was 1140): with Select mode's three extra buttons
   a large bar is ~1230 px, so at 1140 View was pushed off the end. Found by the README screenshots.
+- **v0.9.33 (2026-10-29): Select moves to the location bar** (Alex), left of Properties, with All / None /
+  Invert beside it while it's on; it left the command bar, so the large size is back to 1140 sp. The
+  select-mode feature test now turns it on with that button.

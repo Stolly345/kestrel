@@ -719,7 +719,7 @@ def _():
     eventually(lambda: "text/markdown=ft-open.desktop" in default(), "FT Open the default again")
 
 
-@test("command bar: icons only, each named by its tooltip; Properties sits in the location bar")
+@test("command bar: icons only, each named by its tooltip; Select and Properties sit in the location bar")
 def _():
     start(D)
     for tip in ["Cut (Ctrl+X)", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "Undo (Ctrl+Z)", "Redo (Ctrl+Shift+Z)",
@@ -759,10 +759,12 @@ def tick(box):
     dpy.sync(); time.sleep(0.6)
 
 
-@test("select mode: checkboxes add to the selection one by one")
+@test("select mode: the location bar's Select button puts a checkbox on every item")
 def _():
     start(D)
-    palette("select mode")
+    b = wait(lambda: all_("toggle button", "Select (checkboxes)")[0], "the location bar's Select button")
+    if not activate(b):
+        click(b)
     boxes = wait(lambda: [b for b in all_("check box") if b.get_name() == "Select"][:3], "checkboxes")
     assert len(boxes) == 3, f"{len(boxes)} checkboxes"
     tick(boxes[0]); tick(boxes[2])

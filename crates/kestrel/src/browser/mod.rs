@@ -476,6 +476,23 @@ impl Browser {
             .propagate_natural_height(true)
             .build();
         let crumb_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // Select: checkboxes on every item; All / None / Invert while it's on
+        let select = gtk::ToggleButton::builder()
+            .icon_name("selection-mode-symbolic")
+            .action_name("win.select-mode")
+            .tooltip_text("Select (checkboxes)")
+            .css_classes(["flat", "crumb"])
+            .build();
+        crumb_row.append(&select);
+        for (icon, action, tip) in [
+            ("edit-select-all-symbolic", "win.select-all", "Select all (Ctrl+A)"),
+            ("edit-clear-all-symbolic", "win.select-none", "Select none (Ctrl+Shift+A)"),
+            ("object-flip-horizontal-symbolic", "win.invert-selection", "Invert selection (Ctrl+Shift+I)"),
+        ] {
+            let b = gtk::Button::builder().icon_name(icon).action_name(action).tooltip_text(tip).css_classes(["flat", "crumb"]).build();
+            select.bind_property("active", &b, "visible").sync_create().build();
+            crumb_row.append(&b);
+        }
         // Properties of the selection, or of this folder when nothing is selected
         crumb_row.append(
             &gtk::Button::builder()

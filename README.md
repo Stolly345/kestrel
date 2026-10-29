@@ -62,7 +62,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - `ks`: the same search on the command line, like Everything's `es.exe`
 
 **File manager**
-- A command bar like Windows Explorer's, as icons (hover for the name and shortcut): New, Open, Select, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Compress, Extract, Delete, View. The buttons grow or shrink with the window to stay on one row, and only a narrow window takes two. Properties (ⓘ) sits at the start of the path bar
+- A command bar like Windows Explorer's, as icons (hover for the name and shortcut): New, Open, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Compress, Extract, Delete, View. The buttons grow or shrink with the window to stay on one row, and only a narrow window takes two. Select (☑) and Properties (ⓘ) sit at the start of the path bar
 - Select mode: a checkbox on every file, so you can tick exactly the ones you want (All / None / Invert too)
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
@@ -127,7 +127,14 @@ flowchart LR
 
 ## Install
 
-Kestrel targets **Ubuntu 26.04** (amd64). Build the package and install it:
+Kestrel targets **Ubuntu 26.04** (amd64). Download the `.deb` from the
+[latest release](https://github.com/Stolly345/kestrel/releases/latest) and install it:
+
+```sh
+sudo apt install ./kestrel_*_amd64.deb
+```
+
+Or build the package yourself:
 
 ```sh
 cargo deb -p kestrel
