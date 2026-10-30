@@ -1492,7 +1492,9 @@ impl Browser {
             }
         } else if let Some(f) = info_file(info) {
             // GVfs' archive backend is in gvfs-backends (Recommends); without it, open in an app
-            if f.is_native() && crate::archive::browse_on_open(&info.name().to_string_lossy()) && std::path::Path::new("/usr/libexec/gvfsd-archive").exists() {
+            if f.is_native() && crate::debinstall::is_deb(&info.name().to_string_lossy()) {
+                crate::debinstall::show(&self.ops, &f);
+            } else if f.is_native() && crate::archive::browse_on_open(&info.name().to_string_lossy()) && std::path::Path::new("/usr/libexec/gvfsd-archive").exists() {
                 self.go(Loc::Dir(crate::archive::archive_root(&f)));
                 self.focus_view();
             } else {

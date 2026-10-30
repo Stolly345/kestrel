@@ -2,6 +2,7 @@
 
 mod archive;
 mod browser;
+mod debinstall;
 mod filemanager1;
 mod fileops;
 mod git;

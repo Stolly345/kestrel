@@ -189,6 +189,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F11 | Select mode: checkboxes on items; All / None / Invert | P1 (done 0.9.25) |
 | F12 | New ▸ documents (txt, md, docx, xlsx, pptx, pdf) and shortcuts, opened in the default app | P1 (done 0.9.28) |
 | F13 | Open With with "Always use for this file type", and Set Default App, so default apps can be changed without leaving Kestrel | P1 (done 0.9.29) |
+| F14 | Install a .deb by double-click: wizard (info, installed version, Desktop icon switch), apt via pkexec, Open when done; Browse Archive stays on the right-click menu | P1 (done 0.9.34) |
+| F15 | Open File Location on search results | P1 (done 0.9.34) |
 
 ### 7.5 CLI
 - `ks` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
@@ -604,3 +606,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 - **v0.9.33 (2026-10-29): Select moves to the location bar** (Alex), left of Properties, with All / None /
   Invert beside it while it's on; it left the command bar, so the large size is back to 1140 sp. The
   select-mode feature test now turns it on with that button.
+- **v0.9.34 (2026-10-30): .deb installer and Open File Location** (Alex). Double-clicking a `.deb` opens a
+  two-step wizard (debinstall.rs): package, version, architecture, size, installed version (Install /
+  Reinstall / Replace), "Add an icon to the Desktop" (on); then `pkexec env DEBIAN_FRONTEND=noninteractive
+  apt-get install -y --allow-downgrades <absolute path>` with a live log, and the package's visible
+  `/usr/share/applications` launchers copied to ~/Desktop, executable and `metadata::trusted` for Desktop
+  Icons NG; Open launches it via `gio launch` (DesktopAppInfo is in gio-unix, not worth a crate). Browse
+  Archive stays on the right-click menu and in the wizard. Open File Location (search only) goes to the
+  result's folder and selects it. pkexec runs apt in another directory, so the path must be absolute.
+  Feature tests fake pkexec and `dpkg-query -L`.

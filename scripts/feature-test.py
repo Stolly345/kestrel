@@ -1175,6 +1175,56 @@ def _():
     eventually(lambda: os.path.exists(out) and "IMG_0001.txt" in open(out).read(), "the default app launched")
 
 
+@test("search: Open File Location goes to the result's folder and selects it")
+def _():
+    index(); start(D)
+    e = one("entry", "Search files"); click(e); typ("main.rs")
+    eventually(lambda: names() == ["main.rs"], "the result")
+    select("main.rs"); palette("open file location")
+    eventually(lambda: names() == ["main.rs"] and "1 selected" in status() and "result" not in status(), "src with main.rs selected")
+
+
+@test("install: double-clicking a .deb opens the installer; it installs and puts the icon on the Desktop")
+def _():
+    root = os.path.join(HOME, "debroot")
+    os.makedirs(os.path.join(root, "DEBIAN"), exist_ok=True)
+    open(os.path.join(root, "DEBIAN/control"), "w").write(
+        "Package: ft-pkg\nVersion: 1.0\nArchitecture: all\nMaintainer: t <t@t>\nDescription: a test package\n")
+    subprocess.run(["dpkg-deb", "--build", "--root-owner-group", root, os.path.join(D, "ft.deb")], check=True, capture_output=True)
+    # a real visible launcher stands in for the package's own; pkexec and dpkg-query -L are faked
+    apps = "/usr/share/applications"
+    launcher = next(f for f in sorted(os.listdir(apps)) if f.endswith(".desktop")
+                    and "NoDisplay=true" not in open(os.path.join(apps, f), errors="ignore").read())
+    bin_ = os.path.join(HOME, "fakebin"); os.makedirs(bin_, exist_ok=True)
+    open(os.path.join(bin_, "pkexec"), "w").write('#!/bin/sh\necho "$@" > "$HOME/pkexec-args"\necho Setting up ft-pkg\n')
+    open(os.path.join(bin_, "dpkg-query"), "w").write(
+        f'#!/bin/sh\n[ "$1" = -L ] && {{ echo {apps}/{launcher}; exit 0; }}\nexec /usr/bin/dpkg-query "$@"\n')
+    for f in ("pkexec", "dpkg-query"):
+        os.chmod(os.path.join(bin_, f), 0o755)
+    path = os.environ["PATH"]
+    os.environ["PATH"] = bin_ + ":" + path
+    try:
+        start(D)
+    finally:
+        os.environ["PATH"] = path
+    click(row("ft.deb"), double=True)
+    wait(lambda: all_(None, "Install ft-pkg?"), "the installer")
+    press_button("Install")
+    wait(lambda: all_(None, "ft-pkg is installed"), "installed", 10)
+    args = open(os.path.join(HOME, "pkexec-args")).read()
+    assert "apt-get install -y" in args and args.strip().endswith("ft.deb"), args
+    icon = os.path.join(HOME, "Desktop", launcher)
+    assert os.access(icon, os.X_OK), "no executable Desktop icon"
+    trusted = subprocess.run(["gio", "info", "-a", "metadata::trusted", icon], capture_output=True, text=True).stdout
+    assert "metadata::trusted: true" in trusted, trusted
+    press_button("Close")
+    # Browse Contents still looks inside
+    click(row("ft.deb"), double=True)
+    wait(lambda: all_(None, "Install ft-pkg?"), "the installer")
+    press_button("Browse Contents")
+    eventually(lambda: "debian-binary" in names(), "the package's contents", 10)
+
+
 @test("default file manager: FileManager1.ShowItems opens and selects")
 def _():
     start("--filemanager1", window=False)

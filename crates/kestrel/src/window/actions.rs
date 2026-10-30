@@ -71,6 +71,13 @@ impl Win {
                 o.go(Loc::Dir(d));
             }
         });
+        // from a search result: its folder, with it selected (Back returns to the results)
+        self.act("locate", |w| {
+            let (Some(b), Some(f)) = (w.current(), w.sel().into_iter().next()) else { return };
+            let (Some(dir), Some(name)) = (f.parent(), f.basename()) else { return };
+            b.go(Loc::Dir(dir));
+            b.select_when_loaded(vec![name.to_string_lossy().into_owned()], || {});
+        });
         self.act("copy", |w| w.ops.set_clipboard(&w.sel(), false));
         self.act("cut", |w| w.ops.set_clipboard(&w.sel(), true));
         for (name, link) in [("paste", false), ("paste-link", true)] {

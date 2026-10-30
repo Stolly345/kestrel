@@ -27,6 +27,7 @@ pub const COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("Set default app…", "win.set-default-app", None),
     ("Open in new tab", "win.open-tab", None),
     ("Open in other pane", "win.open-other", None),
+    ("Open file location", "win.locate", None),
     ("Copy", "win.copy", None),
     ("Cut", "win.cut", None),
     ("Paste", "win.paste", None),
