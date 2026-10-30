@@ -250,12 +250,12 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   page, and saves every screen to `target/ui-check/`.
 - **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
   shortcuts through the accessibility layer under a virtual display, then checks the result on disk
-  and on screen. 57 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
+  and on screen. 63 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
   copy/move/rename/undo/redo/trash/restore/delete and name clashes, New documents opening in their apps, Open With and Set Default App, Paste as Link, Select
   mode and its checkboxes, batch rename, tags, search (typing, type
   ranking, scopes, tags, content, saved searches, the query language), previews, properties and
-  checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files and
-  Show in Folder. Failures leave a screenshot and a dump of what was on screen in
+  checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files,
+  Show in Folder and Open File Location, and installing a .deb by double-click. Failures leave a screenshot and a dump of what was on screen in
   `target/feature-test/`. Needs `xvfb` and `python3-xlib`.
 - **`scripts/screenshots.sh`** regenerates the screenshots above from the real app and a made-up
   home folder.
