@@ -624,3 +624,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   cargo-generate-rpm (`[package.metadata.generate-rpm]`, packaging/rpm scriptlets doing what %systemd_post etc.
   expand to); library requirements from the binaries' sonames, so no distro package names. Installs and runs on
   Fedora 43 and Tumbleweed. The .deb wizard only takes over where apt-get exists.
+- **Arch package (2026-10-31, no version bump):** `packaging/aur` (kestrel-bin) repackages the release .deb; namcap
+  clean apart from the expected "tools aren't linked" notes; built, installed, launched and searched in an
+  archlinux container. Arch policy: it prints `systemctl enable --now kestrel-indexd` instead of enabling it.
+  Not yet on the AUR (needs Alex's AUR account); README installs it from the repo meanwhile.

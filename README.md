@@ -137,12 +137,24 @@ Download the package for your system from the
 | Ubuntu 26.04, Debian 13 (trixie) or newer | `kestrel_<version>-1_amd64.deb` | `sudo apt install ./kestrel_*_amd64.deb` |
 | Fedora 41 or newer | `kestrel-<version>-1.x86_64.rpm` | `sudo dnf install ./kestrel-*.x86_64.rpm` |
 | openSUSE Tumbleweed | `kestrel-<version>-1.x86_64.rpm` | `sudo zypper install --allow-unsigned-rpm ./kestrel-*.x86_64.rpm` |
+| Arch, Manjaro, EndeavourOS, CachyOS | none, see below | build the `kestrel-bin` package (below) |
 
 Run the command in the folder you downloaded to (usually `cd ~/Downloads`); the `./` matters, it
 tells apt/dnf/zypper you mean a file, not a package from the internet. They fetch everything else
 Kestrel needs and ask once. The package starts the index service; to make Kestrel your default file
 manager, switch it on in **Preferences**.
 
+- **Arch and Arch-based:** the PKGBUILD in `packaging/aur` repackages the release `.deb`, so nothing
+  compiles. Then turn the search service on once (Arch packages never do that themselves):
+
+  ```sh
+  sudo pacman -S --needed git base-devel
+  git clone --depth 1 https://github.com/Stolly345/kestrel && cd kestrel/packaging/aur
+  makepkg -si
+  sudo systemctl enable --now kestrel-indexd
+  ```
+
+  Remove with `sudo pacman -R kestrel-bin`.
 - **Use apt, not `dpkg -i`.** dpkg doesn't fetch dependencies, so it stops at the first missing one
   (on Debian usually `libvte-2.91-gtk4-0`). If that already happened, `sudo apt -f install` finishes it.
 - **Not supported:** Debian 12 and Ubuntu before 26.04 (GTK, libadwaita and glibc are too old), Fedora 40

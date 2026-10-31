@@ -1,0 +1,13 @@
+post_install() {
+    echo ">>> Turn on whole-disk search (the index service), once:"
+    echo ">>>     sudo systemctl enable --now kestrel-indexd"
+}
+
+post_upgrade() {
+    systemctl daemon-reload >/dev/null 2>&1 || :
+    systemctl try-restart kestrel-indexd.service >/dev/null 2>&1 || :
+}
+
+pre_remove() {
+    systemctl disable --now kestrel-indexd.service >/dev/null 2>&1 || :
+}
