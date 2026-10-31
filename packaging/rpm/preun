@@ -1,0 +1,4 @@
+# last copy going away (not an upgrade): stop the service
+if [ "$1" -eq 0 ]; then
+    systemctl disable --now kestrel-indexd.service >/dev/null 2>&1 || :
+fi

@@ -290,8 +290,15 @@ pub fn stats(q: &str) -> Option<(usize, u64)> {
 /// share, an excluded folder), not that it's empty.
 pub fn folder_stats(dir: &std::path::Path) -> Result<(usize, u64), &'static str> {
     let (n, b) = stats(&under_query(dir)).ok_or("Folder size needs kestrel-indexd")?;
-    if n == 0 && std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
-        return Err("Not in the search index");
+    if n == 0 {
+        match std::fs::read_dir(dir) {
+            Err(_) => return Err("Can't read this folder"),
+            Ok(mut d) => {
+                if d.next().is_some() {
+                    return Err("Not in the search index");
+                }
+            }
+        }
     }
     Ok((n, b))
 }

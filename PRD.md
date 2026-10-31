@@ -5,7 +5,7 @@
 | Owner | Alex Stoll |
 | Status | Draft v1 — 2026-10-25 |
 | Platform | Ubuntu 26.04, GNOME, Wayland, ext4 |
-| Stack | Rust, GTK4 + libadwaita, root index daemon (fanotify), `.deb` |
+| Stack | Rust, GTK4 + libadwaita, root index daemon (fanotify), `.deb` + `.rpm` (0.9.35: also Debian 13+, Fedora 40+, openSUSE Tumbleweed) |
 | Supersedes | The scope sections of `PLAN.md` (that file stays as the engineering log) |
 
 ---
@@ -615,3 +615,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Archive stays on the right-click menu and in the wizard. Open File Location (search only) goes to the
   result's folder and selects it. pkexec runs apt in another directory, so the path must be absolute.
   Feature tests fake pkexec and `dpkg-query -L`.
+- **v0.9.35 (2026-10-31): folder sizes in the Size column, and an .rpm** (Alex). Folders' totals come from
+  the index (the preview's `under:` query, 0.1-0.3 s) the first time a row shows, off the GTK thread, cached on
+  the FileInfo for that listing; unindexed/network/unreadable folders stay blank (an unreadable folder used to
+  say "0 bytes", in the preview too). Size sort uses the totals fetched so far. A user's "libvte-2.91-gtk4-0
+  can't be resolved" on Debian was `dpkg -i` (no dependency fetching): the .deb installs with apt on Debian 13
+  (checked in a container); Debian 12's GTK 4.8 / libadwaita 1.2 / glibc 2.36 are too old. New `.rpm` via
+  cargo-generate-rpm (`[package.metadata.generate-rpm]`, packaging/rpm scriptlets doing what %systemd_post etc.
+  expand to); library requirements from the binaries' sonames, so no distro package names. Installs and runs on
+  Fedora 43 and Tumbleweed. The .deb wizard only takes over where apt-get exists.

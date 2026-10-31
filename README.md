@@ -76,7 +76,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
 - Colour tags, git status column and branch, symlink badges, free-space bars on drives
 - Command palette (Ctrl+Shift+P), terminal panel that follows the folder (Ctrl+\`)
-- Properties with checksums (MD5, SHA-1, SHA-256) and paste-to-verify; folder sizes instantly from the index, or on request (Calculate) for network shares
+- Properties with checksums (MD5, SHA-1, SHA-256) and paste-to-verify; folder sizes instantly from the index (also in the Size column), or on request (Calculate) for network shares
 - Right-click scripts from `~/.local/share/nautilus/scripts`, run exactly as GNOME Files runs them
 - Can be your default file manager, including "Show in Folder" from other apps
 
@@ -129,22 +129,34 @@ flowchart LR
 
 ## Install
 
-Kestrel targets **Ubuntu 26.04** (amd64). Download the `.deb` from the
-[latest release](https://github.com/Stolly345/kestrel/releases/latest) and install it:
+Download the package for your system from the
+[latest release](https://github.com/Stolly345/kestrel/releases/latest) (64-bit x86 only), then:
+
+| System | File | Install with |
+| --- | --- | --- |
+| Ubuntu 26.04, Debian 13 (trixie) or newer | `kestrel_<version>-1_amd64.deb` | `sudo apt install ./kestrel_*_amd64.deb` |
+| Fedora 41 or newer | `kestrel-<version>-1.x86_64.rpm` | `sudo dnf install ./kestrel-*.x86_64.rpm` |
+| openSUSE Tumbleweed | `kestrel-<version>-1.x86_64.rpm` | `sudo zypper install --allow-unsigned-rpm ./kestrel-*.x86_64.rpm` |
+
+Run the command in the folder you downloaded to (usually `cd ~/Downloads`); the `./` matters, it
+tells apt/dnf/zypper you mean a file, not a package from the internet. They fetch everything else
+Kestrel needs and ask once. The package starts the index service; to make Kestrel your default file
+manager, switch it on in **Preferences**.
+
+- **Use apt, not `dpkg -i`.** dpkg doesn't fetch dependencies, so it stops at the first missing one
+  (on Debian usually `libvte-2.91-gtk4-0`). If that already happened, `sudo apt -f install` finishes it.
+- **Not supported:** Debian 12 and Ubuntu before 26.04 (GTK, libadwaita and glibc are too old), Fedora 40
+  and older, RHEL/Rocky/Alma 9, Arm. RHEL 10 is untested.
+- **Remove:** `sudo apt remove kestrel` / `sudo dnf remove kestrel` / `sudo zypper remove kestrel`.
+
+Build the packages yourself:
 
 ```sh
-sudo apt install ./kestrel_*_amd64.deb
+cargo build --release
+cargo deb -p kestrel --no-build              # -> target/debian/kestrel_*_amd64.deb
+cargo install cargo-generate-rpm             # once
+cargo generate-rpm -p crates/kestrel         # -> target/generate-rpm/kestrel-*.x86_64.rpm
 ```
-
-Or build the package yourself:
-
-```sh
-cargo deb -p kestrel
-sudo apt install ./target/debian/kestrel_*_amd64.deb
-```
-
-apt lists anything missing and asks once. The package starts the index service; to make Kestrel
-your default file manager, switch it on in **Preferences**.
 
 <details>
 <summary><b>Dependencies</b></summary>

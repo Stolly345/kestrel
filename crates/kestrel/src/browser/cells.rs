@@ -163,6 +163,48 @@ pub(crate) fn label_factory(b: &Weak<Browser>, xalign: f32, text: impl Fn(&gio::
     )
 }
 
+/// A folder's total bytes from the index, set on its FileInfo once fetched; NO_SIZE while the
+/// query runs or when the index doesn't cover the folder (so it's asked once per listing).
+const DIR_BYTES: &str = "kestrel::dir-bytes";
+const NO_SIZE: u64 = u64::MAX;
+
+/// Size column value: file size, or a folder's total once known (for sorting).
+pub(crate) fn size_of(info: &gio::FileInfo) -> i64 {
+    match info.has_attribute(DIR_BYTES).then(|| info.attribute_uint64(DIR_BYTES)) {
+        Some(b) if b != NO_SIZE => b as i64,
+        _ if is_dirlike(info) => 0,
+        _ => info.size(),
+    }
+}
+
+/// The Size cell. Folders ask kestrel-indexd for their total (0.1-0.3 s, off the GTK thread) the
+/// first time they're shown; the label is filled in if it still shows that folder when the answer comes.
+pub(crate) fn bind_size(l: &gtk::Label, info: &gio::FileInfo) {
+    unsafe { l.set_data("kestrel-size-info", info.clone()) };
+    let text = |info: &gio::FileInfo| {
+        let known = !is_dirlike(info) || info.has_attribute(DIR_BYTES) && info.attribute_uint64(DIR_BYTES) != NO_SIZE;
+        if known { glib::format_size(size_of(info) as u64).to_string() } else { String::new() }
+    };
+    l.set_text(&text(info));
+    if !is_dirlike(info) || info.has_attribute(DIR_BYTES) {
+        return;
+    }
+    // non-native = GVfs (smb://, sftp://): not indexed, and the empty-check could block on a dead share
+    let Some(p) = info_file(info).filter(|f| f.is_native()).and_then(|f| f.path()) else { return };
+    info.set_attribute_uint64(DIR_BYTES, NO_SIZE);
+    let (lw, info) = (l.downgrade(), info.clone());
+    glib::spawn_future_local(async move {
+        if let Ok(Ok((_, b))) = gio::spawn_blocking(move || crate::search::folder_stats(&p)).await {
+            info.set_attribute_uint64(DIR_BYTES, b);
+        }
+        let Some(l) = lw.upgrade() else { return };
+        let shown = unsafe { l.data::<gio::FileInfo>("kestrel-size-info").map(|p| p.as_ref().clone()) };
+        if shown.as_ref() == Some(&info) {
+            l.set_text(&text(&info));
+        }
+    });
+}
+
 /// " · → /target" for a symlink, " · 3 hard links" for a file with other names.
 pub(crate) fn link_note(info: &gio::FileInfo) -> String {
     if let Some(t) = link_target(info) {

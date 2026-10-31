@@ -1,0 +1,7 @@
+# what %systemd_post + restart-on-upgrade expand to: enable+start on first install, restart on upgrade
+systemctl daemon-reload >/dev/null 2>&1 || :
+if [ "$1" -eq 1 ]; then
+    systemctl enable --now kestrel-indexd.service >/dev/null 2>&1 || :
+else
+    systemctl try-restart kestrel-indexd.service >/dev/null 2>&1 || :
+fi

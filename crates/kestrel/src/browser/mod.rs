@@ -345,14 +345,21 @@ impl Browser {
         dir_col.set_visible(false);
         let size_col = col(
             "Size",
-            label_factory(&me, 1.0, |i| {
-                if is_dirlike(i) {
-                    String::new()
-                } else {
-                    glib::format_size(i.size() as u64).to_string()
-                }
-            }),
-            gtk::CustomSorter::new(|a, b| cmp(info_of(a).size(), info_of(b).size())),
+            factory(
+                &me,
+                None,
+                || {
+                    gtk::Label::builder()
+                        .xalign(1.0)
+                        .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                        .css_classes(["dim-label"])
+                        .build()
+                        .upcast()
+                },
+                |w, info| bind_size(w.downcast_ref::<gtk::Label>().unwrap(), info),
+            ),
+            // ponytail: folders sort by the totals already fetched; unknown ones count as 0 until shown
+            gtk::CustomSorter::new(|a, b| cmp(size_of(info_of(a)), size_of(info_of(b)))),
             90,
         );
         let date_col = col(
@@ -1492,7 +1499,8 @@ impl Browser {
             }
         } else if let Some(f) = info_file(info) {
             // GVfs' archive backend is in gvfs-backends (Recommends); without it, open in an app
-            if f.is_native() && crate::debinstall::is_deb(&info.name().to_string_lossy()) {
+            // the wizard runs dpkg-deb and apt-get: on Fedora etc. a .deb just opens like any file
+            if f.is_native() && crate::debinstall::is_deb(&info.name().to_string_lossy()) && glib::find_program_in_path("apt-get").is_some() {
                 crate::debinstall::show(&self.ops, &f);
             } else if f.is_native() && crate::archive::browse_on_open(&info.name().to_string_lossy()) && std::path::Path::new("/usr/libexec/gvfsd-archive").exists() {
                 self.go(Loc::Dir(crate::archive::archive_root(&f)));

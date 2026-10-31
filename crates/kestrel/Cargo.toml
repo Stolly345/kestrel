@@ -59,3 +59,54 @@ unit-name = "kestrel-indexd"
 enable = true
 start = true
 restart-after-upgrade = true
+
+# `cargo generate-rpm -p crates/kestrel` after `cargo build --release`. Library requirements come
+# from the binaries' sonames (auto-req), so no distro package names to keep in step.
+[package.metadata.generate-rpm]
+name = "kestrel"
+summary = "File manager with instant whole-disk search (Everything + Files for Linux)"
+release = "1"
+post_install_script = "../../packaging/rpm/post"
+pre_uninstall_script = "../../packaging/rpm/preun"
+post_uninstall_script = "systemctl daemon-reload >/dev/null 2>&1 || :"
+assets = [
+    { source = "target/release/kestrel", dest = "/usr/bin/kestrel", mode = "755" },
+    { source = "target/release/kestrel-indexd", dest = "/usr/bin/kestrel-indexd", mode = "755" },
+    { source = "target/release/ks", dest = "/usr/bin/ks", mode = "755" },
+    { source = "../../packaging/excludes", dest = "/etc/kestrel/excludes", mode = "644", config = "noreplace" },
+    { source = "../../packaging/kestrel-indexd.service", dest = "/usr/lib/systemd/system/kestrel-indexd.service", mode = "644" },
+    { source = "../../packaging/dev.kestrel.Kestrel.desktop", dest = "/usr/share/applications/dev.kestrel.Kestrel.desktop", mode = "644" },
+    { source = "../../packaging/dev.kestrel.Kestrel.svg", dest = "/usr/share/icons/hicolor/scalable/apps/dev.kestrel.Kestrel.svg", mode = "644" },
+    { source = "../../packaging/kestrel-mime.xml", dest = "/usr/share/mime/packages/kestrel.xml", mode = "644" },
+    { source = "../../PLAN.md", dest = "/usr/share/doc/kestrel/PLAN.md", mode = "644", doc = true },
+    { source = "../../packaging/7zip/7zz", dest = "/usr/lib/kestrel/7zz", mode = "755" },
+    { source = "../../packaging/7zip/License.txt", dest = "/usr/share/doc/kestrel/7zip-License.txt", mode = "644", doc = true },
+    { source = "../../LICENSE-MIT", dest = "/usr/share/licenses/kestrel/LICENSE-MIT", mode = "644" },
+    { source = "../../LICENSE-APACHE", dest = "/usr/share/licenses/kestrel/LICENSE-APACHE", mode = "644" },
+    { source = "../../packaging/THIRD-PARTY-LICENSES.txt", dest = "/usr/share/licenses/kestrel/THIRD-PARTY-LICENSES.txt", mode = "644" },
+]
+auto-req = "builtin"
+
+[package.metadata.generate-rpm.requires]
+bubblewrap = "*"
+tar = "*"
+gzip = "*"
+xz = "*"
+bzip2 = "*"
+zstd = "*"
+gvfs = "*"
+xdg-utils = "*"
+"/usr/bin/pkexec" = "*"
+
+# weak: dnf installs them by default and skips any a distro doesn't have
+[package.metadata.generate-rpm.recommends]
+gstreamer1-plugins-good = "*"
+gstreamer1-plugins-bad-free = "*"
+gstreamer1-plugins-ugly-free = "*"
+gvfs-smb = "*"
+ncompress = "*"
+xdg-terminal-exec = "*"
+poppler-utils = "*"
+libreoffice-writer = "*"
+libreoffice-calc = "*"
+libreoffice-impress = "*"
