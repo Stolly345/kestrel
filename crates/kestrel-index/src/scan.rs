@@ -217,19 +217,20 @@ pub struct ScanStats {
 
 /// Index a whole filesystem rooted at `root` as a new root entry.
 pub fn scan(ix: &mut Index, root: &Path, excludes: &[PathBuf]) -> std::io::Result<ScanStats> {
-    scan_root(ix, root, excludes, true)
+    scan_root(ix, root, excludes, true, None)
 }
 
 /// Index a network share: like `scan`, minus the tag and ACL lookups. Over SMB each is another
 /// round trip per file (it doubled a 169k-file NAS listing), and shares rarely carry either.
-pub fn scan_share(ix: &mut Index, root: &Path, excludes: &[PathBuf]) -> std::io::Result<ScanStats> {
-    scan_root(ix, root, excludes, false)
+/// `progress` counts entries as they're filed, for "Listing… N items so far".
+pub fn scan_share(ix: &mut Index, root: &Path, excludes: &[PathBuf], progress: &std::sync::atomic::AtomicUsize) -> std::io::Result<ScanStats> {
+    scan_root(ix, root, excludes, false, Some(progress))
 }
 
-fn scan_root(ix: &mut Index, root: &Path, excludes: &[PathBuf], xattrs: bool) -> std::io::Result<ScanStats> {
+fn scan_root(ix: &mut Index, root: &Path, excludes: &[PathBuf], xattrs: bool, progress: Option<&std::sync::atomic::AtomicUsize>) -> std::io::Result<ScanStats> {
     let m = std::fs::symlink_metadata(root)?;
     let id = push(ix, NO_PARENT, root.as_os_str().as_bytes(), Kind::Dir, &meta_of(&m, root));
-    let mut s = scan_under(ix, id, root, m.dev(), excludes, xattrs);
+    let mut s = scan_under(ix, id, root, m.dev(), excludes, xattrs, progress);
     s.entries += 1;
     Ok(s)
 }
@@ -290,7 +291,7 @@ fn list_dir(path: PathBuf, id: u32, dev: u64, excludes: &[PathBuf], xattrs: bool
 /// Worker threads list folders; this thread files each listing into the index and hands the new
 /// subfolders back out as jobs. Nothing waits for tree order (jwalk did, buffering everything its
 /// threads had read ahead: ~600 MB at peak on 2M files), so only listings in flight are held.
-fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[PathBuf], xattrs: bool) -> ScanStats {
+fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[PathBuf], xattrs: bool, progress: Option<&std::sync::atomic::AtomicUsize>) -> ScanStats {
     use std::sync::{Arc, Mutex, mpsc};
     let mut stats = ScanStats::default();
     let (job_tx, job_rx) = mpsc::channel::<(PathBuf, u32)>();
@@ -318,6 +319,9 @@ fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[Pat
             pending -= 1;
             if l.failed {
                 stats.errors += 1;
+            }
+            if let Some(p) = progress {
+                p.fetch_add(l.items.len(), std::sync::atomic::Ordering::Relaxed);
             }
             for (name, k, meta) in l.items {
                 let id = push(ix, l.id, name.as_bytes(), k, &meta);
@@ -374,7 +378,7 @@ pub fn reconcile(ix: &mut Index, path: &Path, fresh: bool, excludes: &[PathBuf])
     }
     let id = push(ix, dir, name, k, &meta);
     if k == Kind::Dir {
-        scan_under(ix, id, path, m.dev(), excludes, true);
+        scan_under(ix, id, path, m.dev(), excludes, true, None);
     }
 }
 

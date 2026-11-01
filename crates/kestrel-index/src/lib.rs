@@ -361,6 +361,11 @@ impl Index {
         true
     }
 
+    /// Could `cred` open folder `i` (r+x on it, and reach it)? For telling a user about a share's root.
+    pub fn can_open(&self, i: u32, cred: &Cred) -> bool {
+        cred.uid == 0 || (self.visible(i, cred) && cred.can(&self.entries[i as usize], self.acls.get(&i).map(|a| &a[..]), 5))
+    }
+
     /// A file's ACL, read from disk (only files about to be opened by `content:` need it).
     fn file_acl(&self, i: u32) -> Option<Box<[AclEntry]>> {
         match self.acls.get(&i) {

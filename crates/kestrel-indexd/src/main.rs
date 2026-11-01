@@ -6,7 +6,7 @@ mod fan;
 mod http;
 mod share;
 
-use kestrel_index::proto::{Hit, Request, Response, socket_path};
+use kestrel_index::proto::{Hit, Request, Response, ShareState, ShareStatus, socket_path};
 use kestrel_index::scan::{load_excludes, local_mounts, network_mounted, network_shares, reconcile, scan_all};
 use kestrel_index::{Cred, Index, Kind, Query, Sort};
 use std::collections::HashMap;
@@ -129,6 +129,40 @@ fn swap_in(ix: &RwLock<Index>, mut fresh: Index, excludes: &[PathBuf]) {
     *w = fresh;
 }
 
+/// Each share's status by mount point, and the running listing's entry count, for the Network page.
+static SHARES: std::sync::Mutex<Vec<ShareStatus>> = std::sync::Mutex::new(Vec::new());
+static LISTED_SO_FAR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn set_share(path: &std::path::Path, f: impl FnOnce(&mut ShareStatus)) {
+    let p = path.to_string_lossy();
+    let mut all = SHARES.lock().unwrap();
+    let i = match all.iter().position(|s| s.path == p) {
+        Some(i) => i,
+        None => {
+            all.push(ShareStatus { path: p.into_owned(), ..Default::default() });
+            all.len() - 1
+        }
+    };
+    f(&mut all[i]);
+}
+
+/// Shares in fstab the caller can open, with their status (Waiting until first seen).
+fn share_status(ix: &Index, cred: &Cred) -> Vec<ShareStatus> {
+    let all = SHARES.lock().unwrap();
+    network_shares(&load_excludes(EXCLUDES_FILE.as_ref()))
+        .into_iter()
+        .filter(|p| ix.root_id(p).is_none_or(|r| ix.can_open(r, cred)))
+        .map(|p| {
+            let path = p.to_string_lossy().into_owned();
+            let mut st = all.iter().find(|s| s.path == path).cloned().unwrap_or(ShareStatus { path, ..Default::default() });
+            if st.state == ShareState::Listing {
+                st.entries = LISTED_SO_FAR.load(std::sync::atomic::Ordering::Relaxed);
+            }
+            st
+        })
+        .collect()
+}
+
 /// How often network shares are re-listed (KESTREL_SHARE_SECS overrides, for tests).
 fn share_every() -> std::time::Duration {
     let secs = std::env::var("KESTREL_SHARE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(3 * 3600);
@@ -154,12 +188,15 @@ fn refresh_shares(ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<s
             let _ = std::fs::read_dir(&s);
             if !network_mounted(&s) {
                 log(format_args!("{}: not mounted, keeping its last listing", s.display()));
+                set_share(&s, |st| st.state = ShareState::Offline);
                 continue;
             }
             let t = Instant::now();
             let mut fresh = Index::default();
+            LISTED_SO_FAR.store(0, std::sync::atomic::Ordering::Relaxed);
+            set_share(&s, |st| st.state = ShareState::Listing);
             // ponytail: a few unreadable folders are normal; more means the share dropped mid-scan
-            match kestrel_index::scan::scan_share(&mut fresh, &s, &excludes) {
+            match kestrel_index::scan::scan_share(&mut fresh, &s, &excludes, &LISTED_SO_FAR) {
                 Ok(st) if st.errors <= 10 && fresh.root_id(&s).is_some() => {
                     let mut w = ix.write().unwrap();
                     w.remove_root(&s);
@@ -167,9 +204,17 @@ fn refresh_shares(ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<s
                     drop(w);
                     changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     log(format_args!("share {}: {} entries in {:.1?} ({} errors)", s.display(), st.entries, t.elapsed(), st.errors));
+                    let now = (now_nanos() / 1_000_000_000) as i64;
+                    set_share(&s, |x| (x.state, x.entries, x.at, x.errors) = (ShareState::Listed, st.entries, now, st.errors));
                 }
-                Ok(st) => log(format_args!("share {}: {} folders unreadable, keeping its last listing", s.display(), st.errors)),
-                Err(e) => log(format_args!("share {}: {e}, keeping its last listing", s.display())),
+                Ok(st) => {
+                    log(format_args!("share {}: {} folders unreadable, keeping its last listing", s.display(), st.errors));
+                    set_share(&s, |x| (x.state, x.errors) = (ShareState::Failed, st.errors));
+                }
+                Err(e) => {
+                    log(format_args!("share {}: {e}, keeping its last listing", s.display()));
+                    set_share(&s, |x| x.state = ShareState::Offline);
+                }
             }
         }
         let _ = wake.recv_timeout(share_every());
@@ -477,6 +522,10 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
                 error: Some(format!("bad request: {e}")),
                 ..Default::default()
             },
+            Ok(req) if req.shares => Response {
+                shares: share_status(&ix.read().unwrap(), cred),
+                ..Default::default()
+            },
             Ok(req) => match Query::parse(&req.q) {
                 Err(e) => Response {
                     error: Some(e),
@@ -527,7 +576,7 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
                         bytes,
                         hits: hits_out,
                         error: None,
-                        indexing: false,
+                        ..Default::default()
                     }
                 }
             },

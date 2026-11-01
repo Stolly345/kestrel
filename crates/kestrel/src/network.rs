@@ -154,6 +154,29 @@ async fn helper(args: &[&str], input: &str) -> Option<Result<String, String>> {
     }
 }
 
+/// "today at 10:52", "Oct 30 at 09:15"
+fn when(at: i64) -> String {
+    let Ok(t) = glib::DateTime::from_unix_local(at) else { return String::new() };
+    let today = glib::DateTime::now_local().is_ok_and(|n| n.ymd() == t.ymd());
+    t.format(if today { "today at %H:%M" } else { "%b %-d at %H:%M" }).map(|s| s.to_string()).unwrap_or_default()
+}
+
+/// An Indexed Shares row's subtitle: where it's mounted, and what the index service says about it.
+fn share_line(mount: &str, st: Option<&kestrel_index::proto::ShareStatus>) -> String {
+    use kestrel_index::proto::ShareState::*;
+    let Some(st) = st else { return mount.to_string() };
+    let n = crate::preview::thousands(st.entries as u64);
+    let last = if st.at > 0 { format!("the listing from {}", when(st.at)) } else { "its last listing".into() };
+    let state = match st.state {
+        Waiting => "Waiting to be listed".to_string(),
+        Listing => format!("Listing… {n} items so far"),
+        Listed => format!("{n} items · listed {}", when(st.at)),
+        Offline => format!("Can't be reached · searching {last}"),
+        Failed => format!("Couldn't list it ({} folders unreadable) · searching {last}", st.errors),
+    };
+    format!("{mount} · {state}")
+}
+
 fn say(parent: &impl IsA<gtk::Widget>, heading: &str, body: &str) {
     let d = adw::AlertDialog::new(Some(heading), Some(body));
     d.add_response("ok", "OK");
@@ -281,8 +304,10 @@ pub fn page(open: Rc<dyn Fn(gio::File)>) -> gtk::Widget {
         .description("Listed every 3 hours, so their files show up in search")
         .build();
     let list = indexed();
+    let mut rows = Vec::new();
     for s in &list {
         let r = row(&s.source, &s.mount.to_string_lossy(), "folder-remote-symbolic");
+        rows.push((s.mount.to_string_lossy().into_owned(), r.downgrade()));
         if s.ours {
             let stop = gtk::Button::builder().label("Stop Indexing").valign(gtk::Align::Center).build();
             let (mp, r2) = (s.mount.to_string_lossy().into_owned(), r.downgrade());
@@ -312,6 +337,27 @@ pub fn page(open: Rc<dyn Fn(gio::File)>) -> gtk::Widget {
     }
     if !list.is_empty() {
         page.add(&shares);
+        // live status while the page is on screen: every 2 s, asked off the main thread
+        let poll = move || {
+            let rows = rows.clone();
+            glib::spawn_future_local(async move {
+                let Ok(Some(all)) = gio::spawn_blocking(crate::search::share_status).await else { return };
+                for (mount, r) in &rows {
+                    if let Some(r) = r.upgrade() {
+                        r.set_subtitle(&glib::markup_escape_text(&share_line(mount, all.iter().find(|s| &s.path == mount))));
+                    }
+                }
+            });
+        };
+        poll();
+        let g = shares.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+            let Some(g) = g.upgrade() else { return glib::ControlFlow::Break };
+            if g.is_mapped() {
+                poll();
+            }
+            glib::ControlFlow::Continue
+        });
     }
 
     // Previous: servers used before, and online-account drives not mounted right now
@@ -456,6 +502,19 @@ mod tests {
         assert_eq!(recent_servers().len(), 1);
         assert!(std::fs::read_to_string(servers_file()).unwrap().contains("a&amp;b"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn share_status_lines() {
+        use kestrel_index::proto::{ShareState, ShareStatus};
+        let st = |state, entries, at, errors| ShareStatus { path: "/mnt/nas".into(), state, entries, at, errors };
+        assert_eq!(share_line("/mnt/nas", None), "/mnt/nas");
+        assert_eq!(share_line("/mnt/nas", Some(&st(ShareState::Listing, 84000, 0, 0))), "/mnt/nas · Listing… 84,000 items so far");
+        let now = glib::DateTime::now_local().unwrap();
+        let line = share_line("/mnt/nas", Some(&st(ShareState::Listed, 182200, now.to_unix(), 0)));
+        assert!(line.starts_with("/mnt/nas · 182,200 items · listed today at "), "{line}");
+        assert_eq!(share_line("/mnt/nas", Some(&st(ShareState::Offline, 0, 0, 0))), "/mnt/nas · Can't be reached · searching its last listing");
+        assert!(share_line("/mnt/nas", Some(&st(ShareState::Failed, 0, 0, 14))).contains("(14 folders unreadable)"));
     }
 
     #[test]

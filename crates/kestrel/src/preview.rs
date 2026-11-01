@@ -118,7 +118,7 @@ fn zim_card(path: std::path::PathBuf, info: &gio::FileInfo) -> gtk::Box {
 }
 
 /// 6863660 -> "6,863,660"
-fn thousands(n: u64) -> String {
+pub fn thousands(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

@@ -652,3 +652,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   removes only a line it added (credentials under /etc/kestrel/shares), fstab first so indexd drops the root;
   refresh_shares also drops roots that are neither local mounts nor listed shares. Verified on the real NAS: wrong
   password = fstab untouched; add mounts; remove restores fstab byte-for-byte. cifs-utils recommended (deb/rpm/Arch).
+  **Live share status** (Alex): indexd keeps a ShareStatus per share (Waiting/Listing/Listed/Offline/Failed, entries,
+  listed-at, errors; static SHARES + LISTED_SO_FAR counter fed by scan_share). New request `{"shares":true}` returns
+  fstab shares the caller can open (Index::can_open on the share root). Network › Indexed Shares subtitles poll it
+  every 2 s while the group is mapped (spawn_blocking; timer stops when the page is gone): "/mnt/nas · Listing…
+  20,483 items so far", "· 182,200 items · listed today at 10:52", "· Can't be reached · searching the listing from …".
+

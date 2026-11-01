@@ -13,7 +13,7 @@ fn main() {
     for r in &roots {
         let ex = scan::load_excludes("/etc/kestrel/excludes".as_ref());
         // SHARE=1: list it the way network shares are listed (no tag/ACL lookups)
-        let s = if std::env::var_os("SHARE").is_some() { scan::scan_share(&mut ix, r, &ex) } else { scan::scan(&mut ix, r, &ex) }.expect("scan");
+        let s = if std::env::var_os("SHARE").is_some() { scan::scan_share(&mut ix, r, &ex, &Default::default()) } else { scan::scan(&mut ix, r, &ex) }.expect("scan");
         eprintln!("{}: {} entries, {} errors", r.display(), s.entries, s.errors);
     }
     eprintln!("scanned {} entries in {:.2?}, ~{} MB", ix.len(), t.elapsed(), ix.approx_bytes() >> 20);

@@ -226,8 +226,9 @@ sudo apt install zip rar arj gcab xar wimtools msitools rpm genisoimage squashfs
 
 Connect to the share once (Network page, or Files), then press **Index…** next to it on Kestrel's
 Network page. Give the share's user name and password, then your own password once, and its files
-show up in your searches within a few minutes, like a local disk's. **Stop Indexing** under
-*Indexed Shares* undoes it. This is SMB (Windows sharing), which nearly every NAS offers; it needs
+show up in your searches within a few minutes, like a local disk's. *Indexed Shares* on the same
+page shows each share's progress ("Listing… 20,483 items so far", "182,200 items · listed today at
+10:52", "Can't be reached"), and **Stop Indexing** there undoes it. This is SMB (Windows sharing), which nearly every NAS offers; it needs
 the `cifs-utils` package, which the .deb and .rpm recommend.
 
 What Index… does: it tries the user name and password first (a wrong one changes nothing), then

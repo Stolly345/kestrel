@@ -186,6 +186,7 @@ impl SearchModel {
             offset: 0,
             limit: Some(PAGE as usize),
             more: false,
+            ..Default::default()
         };
         // each query gets its own connection, so it never queues behind a slow one (a bare `.`
         // matching the whole disk); hanging up the old one tells the daemon to stop working on it
@@ -269,6 +270,13 @@ impl SearchModel {
 }
 
 /// (entries, bytes) for a query, without fetching hits. Blocking: call from a worker thread.
+/// The network shares' listing status (Network page); None if the service doesn't answer.
+pub fn share_status() -> Option<Vec<kestrel_index::proto::ShareStatus>> {
+    let mut c = Conn::open().ok()?;
+    c.w.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok()?;
+    Some(c.ask(&Request { shares: true, ..Default::default() }).ok()?.shares)
+}
+
 pub fn stats(q: &str) -> Option<(usize, u64)> {
     let mut c = Conn::open().ok()?;
     let r = c

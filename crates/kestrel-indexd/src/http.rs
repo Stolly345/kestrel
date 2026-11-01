@@ -103,7 +103,7 @@ fn run(ix: &RwLock<Index>, cred: &Cred, q: &str, sort: Sort, desc: bool, limit: 
         bytes,
         hits: out,
         error: None,
-        indexing: false,
+        ..Default::default()
     }
 }
 
