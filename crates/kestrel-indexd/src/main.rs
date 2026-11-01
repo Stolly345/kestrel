@@ -4,6 +4,7 @@
 
 mod fan;
 mod http;
+mod share;
 
 use kestrel_index::proto::{Hit, Request, Response, socket_path};
 use kestrel_index::scan::{load_excludes, local_mounts, network_mounted, network_shares, reconcile, scan_all};
@@ -139,6 +140,15 @@ fn share_every() -> std::time::Duration {
 /// keeps finding what's on the NAS).
 fn refresh_shares(ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<std::sync::atomic::AtomicU64>, wake: std::sync::mpsc::Receiver<()>) {
     loop {
+        // a share taken out of fstab (Stop Indexing) leaves the index too
+        let keep: Vec<PathBuf> = local_mounts(&excludes).into_iter().chain(network_shares(&excludes)).collect();
+        let stale: Vec<PathBuf> =
+            ix.read().unwrap().roots().map(|r| PathBuf::from(std::ffi::OsStr::from_bytes(r))).filter(|r| !keep.contains(r)).collect();
+        for r in stale {
+            if ix.write().unwrap().remove_root(&r) {
+                log(format_args!("no longer indexed: {}", r.display()));
+            }
+        }
         for s in network_shares(&excludes) {
             // reading the folder lets an automount (x-systemd.automount) mount it
             let _ = std::fs::read_dir(&s);
@@ -168,6 +178,7 @@ fn refresh_shares(ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<s
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    share::command(&args);
     let watch = !args.iter().any(|a| a == "--no-watch");
     let excludes = load_excludes(EXCLUDES_FILE.as_ref());
     log(format_args!("excludes: {excludes:?}"));

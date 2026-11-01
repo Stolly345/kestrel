@@ -96,7 +96,7 @@ pub fn network_mounted(p: &Path) -> bool {
 }
 
 /// `/proc/mounts` escapes space, tab, newline, backslash as `\ooo`.
-fn unescape(s: &str) -> String {
+pub fn unescape(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

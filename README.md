@@ -224,22 +224,27 @@ sudo apt install zip rar arj gcab xar wimtools msitools rpm genisoimage squashfs
 
 ## Indexing a NAS
 
-Kestrel indexes a network share once it's mounted from `/etc/fstab` with the `x-kestrel` option.
-(Shares you open in Files live under `/run/user/…/gvfs`, which only you can see, not the index
-service.) For example, to mount a NAS's `alex` share at `/mnt/nas` the first time something
-opens it:
+Connect to the share once (Network page, or Files), then press **Index…** next to it on Kestrel's
+Network page. Give the share's user name and password, then your own password once, and its files
+show up in your searches within a few minutes, like a local disk's. **Stop Indexing** under
+*Indexed Shares* undoes it. This is SMB (Windows sharing), which nearly every NAS offers; it needs
+the `cifs-utils` package, which the .deb and .rpm recommend.
+
+What Index… does: it tries the user name and password first (a wrong one changes nothing), then
+mounts the share at `/mnt/SERVER-SHARE` from `/etc/fstab` whenever something opens it, with the
+password in a root-only file under `/etc/kestrel/shares`. Only you can open the mount, so its
+files only show up in *your* searches. A share sends no change events, so Kestrel re-lists it
+every 3 hours (`sudo systemctl reload kestrel-indexd` re-lists it now); when it's offline (a laptop
+away from home) its last listing stays searchable.
+
+By hand, or for NFS: any SMB/NFS share in `/etc/fstab` whose options include `x-kestrel` is
+indexed, for example:
 
 ```sh
-sudo mkdir /mnt/nas
-sudo sh -c 'umask 077; printf "username=NAS-USER\npassword=NAS-PASSWORD\n" > /etc/nas.cred'
-echo '//NAS-ADDRESS/alex /mnt/nas cifs credentials=/etc/nas.cred,uid=1000,gid=1000,dir_mode=0700,file_mode=0600,soft,noauto,x-systemd.automount,x-systemd.idle-timeout=30min,x-systemd.mount-timeout=10,_netdev,nofail,x-kestrel 0 0' | sudo tee -a /etc/fstab
-sudo systemctl daemon-reload && sudo systemctl start mnt-nas.automount
-sudo systemctl reload kestrel-indexd    # list it now instead of within 3 hours
+//NAS-ADDRESS/share /mnt/nas cifs credentials=/etc/nas.cred,uid=1000,gid=1000,dir_mode=0700,file_mode=0600,soft,noauto,x-systemd.automount,x-systemd.idle-timeout=30min,_netdev,nofail,x-kestrel 0 0
 ```
 
-`dir_mode=0700` makes the share yours alone, so its files only show up in *your* searches. Shares
-without `x-kestrel` are never listed, which keeps a big share behind a VPN from being walked
-every few hours unasked. Search results from a share can be up to 3 hours old.
+Shares without `x-kestrel` are never listed, so a big share behind a VPN isn't walked unasked.
 
 ## Search syntax
 

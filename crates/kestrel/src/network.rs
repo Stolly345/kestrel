@@ -1,7 +1,8 @@
 //! The Network page (network:///), laid out like GNOME Files': shares you're connected to, servers
 //! you've used before (GTK's ~/.config/gtk-4.0/servers, shared with Files) and online-account
 //! drives, what's found on the local network, and a box to type a server address.
-//! network:/// on its own lists only the last group.
+//! network:/// on its own lists only the last group. Connected SMB shares can be indexed for search
+//! (Index…): `kestrel-indexd --add-share` under pkexec puts them in /etc/fstab with `x-kestrel`.
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -95,6 +96,123 @@ fn is_remote(f: &gio::File) -> bool {
     !f.is_native() || f.path().is_some_and(|p| p.starts_with(glib::user_runtime_dir().join("gvfs")))
 }
 
+/// A share indexed from /etc/fstab: "//nas.local/alex", "/mnt/nas", added from this page.
+struct Indexed {
+    source: String,
+    mount: std::path::PathBuf,
+    ours: bool,
+}
+
+fn indexed_in(fstab: &str) -> Vec<Indexed> {
+    fstab
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>())
+        .filter(|f| f.len() >= 4 && !f[0].starts_with('#') && kestrel_index::scan::NETWORK_FS.contains(&f[2]))
+        .filter(|f| f[3].split(',').any(|o| o == "x-kestrel"))
+        .map(|f| Indexed {
+            source: kestrel_index::scan::unescape(f[0]),
+            mount: kestrel_index::scan::unescape(f[1]).into(),
+            ours: f[3].contains("credentials=/etc/kestrel/shares/"),
+        })
+        .collect()
+}
+
+fn indexed() -> Vec<Indexed> {
+    indexed_in(&std::fs::read_to_string("/etc/fstab").unwrap_or_default())
+}
+
+/// smb://[domain;user@]server/share/… -> (server, share, user)
+fn smb_parts(uri: &str) -> Option<(String, String, String)> {
+    let u = glib::Uri::parse(uri, glib::UriFlags::NONE).ok()?;
+    if u.scheme() != "smb" {
+        return None;
+    }
+    let share = u.path().trim_start_matches('/').split('/').next().filter(|s| !s.is_empty())?.to_string();
+    let user = u.userinfo().map(|i| i.rsplit(';').next().unwrap_or("").to_string()).unwrap_or_default();
+    Some((u.host()?.to_string(), share, user))
+}
+
+const INDEXD: &str = "/usr/bin/kestrel-indexd";
+
+/// Run the share helper as root; Ok(stdout) or Err(message). None = the password prompt was dismissed.
+async fn helper(args: &[&str], input: &str) -> Option<Result<String, String>> {
+    let mut argv: Vec<&std::ffi::OsStr> = vec!["pkexec".as_ref(), INDEXD.as_ref()];
+    argv.extend(args.iter().map(|a| std::ffi::OsStr::new(*a)));
+    let flags = gio::SubprocessFlags::STDIN_PIPE | gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE;
+    let p = match gio::Subprocess::newv(&argv, flags) {
+        Ok(p) => p,
+        Err(e) => return Some(Err(e.to_string())),
+    };
+    let (out, err) = match p.communicate_utf8_future(Some(input.to_string())).await {
+        Ok(o) => o,
+        Err(e) => return Some(Err(e.to_string())),
+    };
+    match p.exit_status() {
+        0 => Some(Ok(out.map(|s| s.trim().to_string()).unwrap_or_default())),
+        126 | 127 => None,
+        _ => Some(Err(err.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "It didn't work".into()))),
+    }
+}
+
+fn say(parent: &impl IsA<gtk::Widget>, heading: &str, body: &str) {
+    let d = adw::AlertDialog::new(Some(heading), Some(body));
+    d.add_response("ok", "OK");
+    d.present(Some(parent));
+}
+
+/// Index…: ask for the share's user name and password, then hand it to the helper.
+fn index_button(server: String, share: String, user: String) -> gtk::Button {
+    let b = gtk::Button::builder()
+        .label("Index…")
+        .tooltip_text("Make this share's files show up in search")
+        .valign(gtk::Align::Center)
+        .build();
+    b.connect_clicked(move |b| {
+        let d = adw::AlertDialog::new(
+            Some("Index this share?"),
+            Some(&format!(
+                "Kestrel will connect //{server}/{share} by itself and list it every 3 hours, so its files show up in your searches (no one else's). It needs the share's user name and password, and then your own password once."
+            )),
+        );
+        let g = adw::PreferencesGroup::new();
+        let name = adw::EntryRow::builder().title("User name on the share").text(&user).build();
+        let pass = adw::PasswordEntryRow::builder().title("Password").build();
+        g.add(&name);
+        g.add(&pass);
+        d.set_extra_child(Some(&g));
+        d.add_response("cancel", "Cancel");
+        d.add_response("index", "Index");
+        d.set_response_appearance("index", adw::ResponseAppearance::Suggested);
+        d.set_default_response(Some("index"));
+        let (server, share, b2) = (server.clone(), share.clone(), b.downgrade());
+        d.connect_response(Some("index"), move |_, _| {
+            let input = format!("{server}\n{share}\n{}\n{}\n", name.text(), pass.text());
+            let Some(b) = b2.upgrade() else { return };
+            b.set_sensitive(false);
+            b.set_label("Connecting…");
+            glib::spawn_future_local(async move {
+                match helper(&["--add-share"], &input).await {
+                    None => {
+                        b.set_label("Index…");
+                        b.set_sensitive(true);
+                    }
+                    Some(Ok(mp)) => {
+                        b.set_label("Indexed");
+                        say(&b, "Indexed", &format!("Its files will show up in search within a few minutes. It's also at {mp}."));
+                    }
+                    Some(Err(e)) => {
+                        b.set_label("Index…");
+                        b.set_sensitive(true);
+                        say(&b, "Couldn't index this share", &e);
+                    }
+                }
+            });
+        });
+        d.present(Some(b));
+    });
+    b
+}
+
 fn row(title: &str, subtitle: &str, icon: &str) -> adw::ActionRow {
     let r = adw::ActionRow::builder()
         .title(glib::markup_escape_text(title))
@@ -120,6 +238,15 @@ pub fn page(open: Rc<dyn Fn(gio::File)>) -> gtk::Widget {
         }
         mounted_uris.push(root.uri().to_string());
         let r = row(&m.name(), &root.uri(), "folder-remote-symbolic");
+        if let Some((server, share, user)) = smb_parts(&root.uri()) {
+            // ponytail: compared as written: mounted by IP but browsed by name looks unindexed
+            let src = format!("//{server}/{share}");
+            if indexed().iter().any(|i| i.source.eq_ignore_ascii_case(&src)) {
+                r.add_suffix(&gtk::Label::builder().label("Indexed").css_classes(["dim-label"]).build());
+            } else {
+                r.add_suffix(&index_button(server, share, user));
+            }
+        }
         if m.can_unmount() {
             let eject = gtk::Button::builder()
                 .icon_name("media-eject-symbolic")
@@ -146,6 +273,45 @@ pub fn page(open: Rc<dyn Fn(gio::File)>) -> gtk::Widget {
     }
     if !mounted_uris.is_empty() {
         page.add(&connected);
+    }
+
+    // Indexed: network shares in fstab with x-kestrel; Stop Indexing for the ones added here
+    let shares = adw::PreferencesGroup::builder()
+        .title("Indexed Shares")
+        .description("Listed every 3 hours, so their files show up in search")
+        .build();
+    let list = indexed();
+    for s in &list {
+        let r = row(&s.source, &s.mount.to_string_lossy(), "folder-remote-symbolic");
+        if s.ours {
+            let stop = gtk::Button::builder().label("Stop Indexing").valign(gtk::Align::Center).build();
+            let (mp, r2) = (s.mount.to_string_lossy().into_owned(), r.downgrade());
+            stop.connect_clicked(move |b| {
+                let (mp, r2, b) = (mp.clone(), r2.clone(), b.clone());
+                b.set_sensitive(false);
+                glib::spawn_future_local(async move {
+                    match helper(&["--remove-share", &mp], "").await {
+                        Some(Ok(_)) => {
+                            if let Some(r) = r2.upgrade() {
+                                r.set_visible(false);
+                            }
+                        }
+                        None => b.set_sensitive(true),
+                        Some(Err(e)) => {
+                            b.set_sensitive(true);
+                            say(&b, "Couldn't stop indexing", &e);
+                        }
+                    }
+                });
+            });
+            r.add_suffix(&stop);
+        }
+        let (o, mp) = (open.clone(), s.mount.clone());
+        r.connect_activated(move |_| o(gio::File::for_path(&mp)));
+        shares.add(&r);
+    }
+    if !list.is_empty() {
+        page.add(&shares);
     }
 
     // Previous: servers used before, and online-account drives not mounted right now
@@ -290,6 +456,20 @@ mod tests {
         assert_eq!(recent_servers().len(), 1);
         assert!(std::fs::read_to_string(servers_file()).unwrap().contains("a&amp;b"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn share_parts_and_fstab() {
+        assert_eq!(smb_parts("smb://mycloudex2ultra.local/alex/"), Some(("mycloudex2ultra.local".into(), "alex".into(), String::new())));
+        assert_eq!(smb_parts("smb://WORKGROUP;bob@nas/My%20Share/sub"), Some(("nas".into(), "My Share".into(), "bob".into())));
+        assert_eq!(smb_parts("smb://nas/"), None, "a server, not a share");
+        assert_eq!(smb_parts("sftp://host/x"), None);
+        let got = indexed_in(
+            "//192.168.50.238/alex /mnt/nas cifs credentials=/etc/nas-alex.cred,x-kestrel 0 0\n\
+             //nas.local/My\\040Share /mnt/nas-my-share cifs credentials=/etc/kestrel/shares/n.cred,x-kestrel 0 0\n\
+             //tv/games /mnt/tvbox cifs credentials=/etc/t,noauto 0 0\n",
+        );
+        assert_eq!(got.iter().map(|i| (i.source.as_str(), i.ours)).collect::<Vec<_>>(), [("//192.168.50.238/alex", false), ("//nas.local/My Share", true)]);
     }
 
     #[test]

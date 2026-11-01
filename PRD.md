@@ -643,3 +643,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   roots over (`swap_in` grafts them into the fresh index); `sync_mounts` never drops them. Opt-in, because Alex's
   fstab already has a Sabrent NFS share over Tailscale that shouldn't be walked every 3 h. gvfs shares can't be
   indexed: /run/user/UID/gvfs is the user's FUSE mount, root can't read it.
+  **Index… button** (Alex: "for the public"): Network page › Connected SMB shares get Index… (AlertDialog with user
+  name + password), which runs `pkexec kestrel-indexd --add-share` with server/share/user/password on stdin (uid from
+  PKEXEC_UID, never the request). share.rs: validates names, test-mounts in /run first (mount errors 13/2/unreachable
+  in words; wrong password changes nothing), writes /etc/kestrel/shares/SLUG.cred (0600), appends a marked fstab line
+  (/mnt/SERVER-SHARE, dir_mode 0700 so only that user sees results, automount + idle 30 min, x-kestrel), starts the
+  .automount, reloads indexd. "Indexed Shares" group lists x-kestrel shares; Stop Indexing (`--remove-share MP`)
+  removes only a line it added (credentials under /etc/kestrel/shares), fstab first so indexd drops the root;
+  refresh_shares also drops roots that are neither local mounts nor listed shares. Verified on the real NAS: wrong
+  password = fstab untouched; add mounts; remove restores fstab byte-for-byte. cifs-utils recommended (deb/rpm/Arch).
