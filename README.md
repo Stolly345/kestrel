@@ -71,6 +71,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Open With lists the apps for a file's type, with *Always use for this file type*; Set Default App changes the default without opening anything. Saved where GNOME Files saves it, so every app agrees
 - Double-click a `.deb` to install it: a wizard shows what it is and whether it's installed, apt fetches its dependencies, and the app's icon lands on your Desktop (optional). Right-click › Browse Archive still looks inside
 - Open File Location on a search result: its folder, with it selected
+- Tells you when a new version is out: once a day it asks GitHub for the latest release (nothing else is sent; turn it off in Preferences › System › Check for updates)
 - Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview

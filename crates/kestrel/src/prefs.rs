@@ -54,6 +54,10 @@ pub struct Settings {
     pub columns: Vec<ColumnPref>,
     /// Preview pane when Kestrel starts: "remember" (as it was at quit) | "show" | "hide"
     pub preview_at_start: String,
+    /// Look for a newer release on GitHub once a day.
+    pub check_updates: bool,
+    /// Unix time of the last update check.
+    pub last_update_check: u64,
 }
 
 impl Default for Settings {
@@ -69,6 +73,8 @@ impl Default for Settings {
             type_style: "full".into(),
             columns: default_columns(),
             preview_at_start: "remember".into(),
+            check_updates: true,
+            last_update_check: 0,
         }
     }
 }
@@ -425,6 +431,9 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
         }
     });
     system.add(&fm);
+    let upd = switch("Check for updates", "Once a day, ask GitHub whether a newer version is out", s.check_updates);
+    upd.connect_active_notify(|r| update(|s| s.check_updates = r.is_active()));
+    system.add(&upd);
     page.add(&system);
     dialog.add(&page);
 

@@ -236,6 +236,7 @@ impl Win {
             .build();
         let toasts = adw::ToastOverlay::new();
         let ops = Ops::new(toasts.clone());
+        crate::update::check(toasts.clone());
         let (item_menu, bg_menu) = menus();
 
         let nav_me = me.clone();

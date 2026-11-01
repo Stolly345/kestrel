@@ -628,3 +628,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   clean apart from the expected "tools aren't linked" notes; built, installed, launched and searched in an
   archlinux container. Arch policy: it prints `systemctl enable --now kestrel-indexd` instead of enabling it.
   Not yet on the AUR (needs Alex's AUR account); README installs it from the repo meanwhile.
+- **v0.9.36 (2026-10-31): update notice** (Alex). Once a day at startup (update.rs) Kestrel reads the tag that
+  github.com/Stolly345/kestrel/releases/latest redirects to (`curl -w %{redirect_url}`: no API, no token, no
+  HTTP crate) and, if it's newer than the running version (numeric compare), shows a toast "Kestrel X.Y.Z is
+  available" with Download (opens the release page). Preferences › System › Check for updates (on by default);
+  the day is stamped before the request, so a failure or a second window waits a day too. No curl or offline:
+  silent. curl added to the .deb/.rpm/Arch dependencies.

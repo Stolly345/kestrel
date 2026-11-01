@@ -21,6 +21,7 @@ mod sidebar;
 mod tags;
 mod term;
 mod thumbs;
+mod update;
 mod whiteboard;
 mod window;
 mod zim;

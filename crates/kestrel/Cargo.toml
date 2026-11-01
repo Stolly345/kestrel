@@ -31,7 +31,7 @@ details/grid/column views, preview pane, git status, color tags and a command \
 palette. Includes the `ks` command-line search client."""
 section = "utils"
 priority = "optional"
-depends = "$auto, bubblewrap, tar, gzip, xz-utils, bzip2, zstd, gvfs, xdg-utils, pkexec"
+depends = "$auto, bubblewrap, tar, gzip, xz-utils, bzip2, zstd, gvfs, xdg-utils, pkexec, curl"
 conflicts = "chimera"
 replaces = "chimera"
 recommends = "gstreamer1.0-libav, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
@@ -97,6 +97,7 @@ zstd = "*"
 gvfs = "*"
 xdg-utils = "*"
 "/usr/bin/pkexec" = "*"
+curl = "*"
 
 # weak: dnf installs them by default and skips any a distro doesn't have
 [package.metadata.generate-rpm.recommends]
