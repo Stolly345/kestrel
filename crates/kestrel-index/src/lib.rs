@@ -424,6 +424,37 @@ impl Index {
         self.search_top(q, sort, desc, cred, None, &std::sync::atomic::AtomicBool::new(false)).0
     }
 
+    /// Every entry below the folder(s) whose lowercased path is `lpath` (which ends in `/`):
+    /// found by walking down from the roots, then the subtree. Case-insensitive like `under:`, so
+    /// `/data/Docs` and `/data/docs` both count.
+    fn below(&self, lpath: &[u8]) -> Vec<u32> {
+        let want = &lpath[..lpath.len() - 1];
+        let mut dirs: Vec<u32> = Vec::new();
+        for &r in &self.roots {
+            let rl = self.lname(r);
+            let rest = if want == rl {
+                Some(&b""[..])
+            } else if want.starts_with(rl) && (rl.ends_with(b"/") || want.get(rl.len()) == Some(&b'/')) {
+                Some(&want[rl.len()..])
+            } else {
+                None
+            };
+            let Some(rest) = rest else { continue };
+            let mut level = vec![r];
+            for part in rest.split(|&c| c == b'/').filter(|p| !p.is_empty()) {
+                level = level.iter().flat_map(|&d| self.children(d).filter(|&c| self.lname(c) == part).collect::<Vec<_>>()).collect();
+            }
+            dirs.extend(level);
+        }
+        let mut out = Vec::new();
+        let mut stack: Vec<u32> = dirs.iter().flat_map(|&d| self.children(d)).collect();
+        while let Some(i) = stack.pop() {
+            out.push(i);
+            stack.extend(self.children(i));
+        }
+        out
+    }
+
     /// `search`, but only the first `top` hits are guaranteed in order: the rest all rank after
     /// them, unordered until `sort_rest`. A one-character query matches nearly everything, and
     /// fully sorting millions of hits to show 500 is what made typing `.` hang. Returns the hits
@@ -431,8 +462,21 @@ impl Index {
     pub fn search_top(&self, q: &Query, sort: Sort, desc: bool, cred: Option<&Cred>, top: Option<usize>, cancel: &std::sync::atomic::AtomicBool) -> (Vec<u32>, usize) {
         use std::sync::atomic::Ordering::Relaxed;
         let read_as = if q.reads { cred.cloned() } else { None };
-        let mut hits: Vec<u32> = (0..self.len() as u32)
-            .into_par_iter()
+        // under:/dir visits only that folder's entries (the Size column asks this per folder shown)
+        let all: Vec<u32>;
+        let candidates: &[u32] = match q.under().map(|p| self.below(p)) {
+            Some(v) => {
+                all = v;
+                &all
+            }
+            None => {
+                all = (0..self.len() as u32).collect();
+                &all
+            }
+        };
+        let mut hits: Vec<u32> = candidates
+            .par_iter()
+            .copied()
             // each worker thread reads `content:` files as the caller (see read_as_caller)
             .map_init(
                 || READ_AS.set(read_as.clone()),

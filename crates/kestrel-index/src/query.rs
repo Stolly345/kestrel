@@ -28,6 +28,23 @@ pub struct Query {
     pub boost: Vec<Vec<u8>>,
 }
 
+impl Query {
+    /// The `under:` folder every hit must be below (lowercased, ending in `/`), when the query is
+    /// that or an AND containing it: the search then only visits that folder's entries.
+    pub fn under(&self) -> Option<&[u8]> {
+        fn leaf(n: &Node) -> Option<&[u8]> {
+            match n {
+                Node::Leaf(Leaf::Under(p)) => Some(p.as_slice()),
+                _ => None,
+            }
+        }
+        match &self.root {
+            Node::All(v) => v.iter().find_map(leaf),
+            n => leaf(n),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dupe {
     Name,
