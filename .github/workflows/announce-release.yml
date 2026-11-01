@@ -2,7 +2,8 @@
 #
 # Needs repo secret MASTODON_TOKEN (mastodon.social > Preferences > Development,
 # scopes write:statuses + write:media). Same file in every repo: the app name,
-# screenshots and alt text come from the README, hashtags from the repo topics,
+# screenshots and alt text come from the README, hashtags from the repo variable
+# MASTODON_HASHTAGS (space-separated; falls back to the repo topics),
 # highlights from the release notes' bullet points.
 #
 # Manual run (Actions tab > Announce release > Run workflow): leave the tag empty
@@ -39,6 +40,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
           MASTODON_INSTANCE: https://mastodon.social
+          HASHTAGS: ${{ vars.MASTODON_HASHTAGS }}
         run: |
           python3 - <<'EOF'
           import base64, json, os, posixpath, re, subprocess, tempfile, time, urllib.request
@@ -106,6 +108,8 @@ jobs:
           topics = [t for t in pref if t in topics] + [t for t in topics if t not in pref]
           camel = lambda t: "".join(p.capitalize() if p.islower() else p for p in re.split(r"[-_]", t))
           tags = " ".join(dict.fromkeys(["#" + camel(t) for t in topics[:5]] + ["#Linux", "#OpenSource"]))
+          if os.environ.get("HASHTAGS", "").strip():  # repo variable MASTODON_HASHTAGS wins
+              tags = " ".join("#" + t.lstrip("#") for t in os.environ["HASHTAGS"].replace(",", " ").split())
 
           # Assemble, fitting as many highlights as Mastodon's 500 chars allow
           # (a link counts as 23).
