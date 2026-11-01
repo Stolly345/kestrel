@@ -380,6 +380,25 @@ impl Index {
         true
     }
 
+    pub fn root_id(&self, root: &Path) -> Option<u32> {
+        self.roots.iter().copied().find(|&r| self.name(r) == root.as_os_str().as_bytes())
+    }
+
+    /// Copy `root` (a root of `src`) and everything still under it into this index as a new root.
+    pub fn graft(&mut self, src: &Index, root: u32) {
+        let mut stack = vec![(root, NO_PARENT)];
+        while let Some((s, parent)) = stack.pop() {
+            let e = &src.entries[s as usize];
+            let id = self.push(parent, src.name(s), e.kind, e.size, e.mtime, e.mode, e.uid, e.gid);
+            let d = &mut self.entries[id as usize];
+            (d.tags, d.atime, d.btime) = (e.tags, e.atime, e.btime);
+            if let Some(a) = src.acls.get(&s) {
+                self.acls.insert(id, a.clone());
+            }
+            stack.extend(src.children(s).map(|c| (c, id)));
+        }
+    }
+
     pub fn roots(&self) -> impl Iterator<Item = &[u8]> + '_ {
         self.roots.iter().map(|&r| self.name(r))
     }

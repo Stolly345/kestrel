@@ -117,6 +117,10 @@ flowchart LR
 - **Live updates** come from fanotify, which reports changes for whole file systems: new,
   renamed and deleted files are searchable within a second. If the kernel ever drops events, the
   service notices and rescans.
+- **Network shares** (SMB/CIFS, NFS) send no change events, so they're re-listed instead: every
+  3 hours, and right away with `sudo systemctl reload kestrel-indexd`. A share that's offline (a
+  laptop away from home) keeps its last listing, so you can still find what's on it. See
+  [Indexing a NAS](#indexing-a-nas).
 - **Privacy:** any user may ask, but every answer is filtered by the asker's own uid, groups and
   ACLs, which the kernel reports for the connection. Files inside someone else's private folder
   never appear, and `content:` opens files *as the asking user*, so the kernel itself enforces
@@ -218,6 +222,25 @@ sudo apt install zip rar arj gcab xar wimtools msitools rpm genisoimage squashfs
 
 </details>
 
+## Indexing a NAS
+
+Kestrel indexes a network share once it's mounted from `/etc/fstab` with the `x-kestrel` option.
+(Shares you open in Files live under `/run/user/…/gvfs`, which only you can see, not the index
+service.) For example, to mount a NAS's `alex` share at `/mnt/nas` the first time something
+opens it:
+
+```sh
+sudo mkdir /mnt/nas
+sudo sh -c 'umask 077; printf "username=NAS-USER\npassword=NAS-PASSWORD\n" > /etc/nas.cred'
+echo '//NAS-ADDRESS/alex /mnt/nas cifs credentials=/etc/nas.cred,uid=1000,gid=1000,dir_mode=0700,file_mode=0600,soft,noauto,x-systemd.automount,x-systemd.idle-timeout=30min,x-systemd.mount-timeout=10,_netdev,nofail,x-kestrel 0 0' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo systemctl start mnt-nas.automount
+sudo systemctl reload kestrel-indexd    # list it now instead of within 3 hours
+```
+
+`dir_mode=0700` makes the share yours alone, so its files only show up in *your* searches. Shares
+without `x-kestrel` are never listed, which keeps a big share behind a VPN from being walked
+every few hours unasked. Search results from a share can be up to 3 hours old.
+
 ## Search syntax
 
 | Query | Finds |
@@ -306,7 +329,8 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
 
 - Ubuntu 26.04, amd64, `.deb` only for now. The index service needs root (fanotify watches whole
   file systems), so it can't ship as a Flatpak or Snap.
-- Local disks only: network shares can be browsed but aren't indexed (they send no change events).
+- Network shares are indexed only when opted in from `/etc/fstab`, and only every 3 hours: they
+  send no change events. Shares opened in Files (gvfs) can be browsed but aren't indexed.
 - English only; no translations yet.
 - Filenames that aren't valid UTF-8 are shown with replacement characters.
 

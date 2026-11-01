@@ -1,11 +1,12 @@
-//! kestrel-indexd: indexes every local filesystem, keeps it live via fanotify, answers
+//! kestrel-indexd: indexes every local filesystem, keeps it live via fanotify, re-lists network
+//! shares from /etc/fstab on a timer, answers
 //! queries on a Unix socket filtered to what the caller could see themselves.
 
 mod fan;
 mod http;
 
 use kestrel_index::proto::{Hit, Request, Response, socket_path};
-use kestrel_index::scan::{load_excludes, local_mounts, reconcile, scan_all};
+use kestrel_index::scan::{load_excludes, local_mounts, network_mounted, network_shares, reconcile, scan_all};
 use kestrel_index::{Cred, Index, Kind, Query, Sort};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -69,19 +70,28 @@ fn save_snapshot(ix: &RwLock<Index>) {
 
 /// SIGTERM (systemd stop, shutdown) and SIGINT: save, then exit. Must be called before any other
 /// thread starts, so they all inherit the blocked mask and only this thread receives the signal.
-fn handle_shutdown(ix: Arc<RwLock<Index>>) {
+/// SIGHUP (`systemctl reload kestrel-indexd`) re-lists network shares now.
+fn handle_shutdown(ix: Arc<RwLock<Index>>, reload: std::sync::mpsc::Sender<()>) {
     unsafe {
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut set);
         libc::sigaddset(&mut set, libc::SIGTERM);
         libc::sigaddset(&mut set, libc::SIGINT);
+        libc::sigaddset(&mut set, libc::SIGHUP);
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
         std::thread::spawn(move || {
-            let mut sig = 0;
-            libc::sigwait(&set, &mut sig);
-            log("stopping: saving index");
-            save_snapshot(&ix);
-            std::process::exit(0);
+            loop {
+                let mut sig = 0;
+                libc::sigwait(&set, &mut sig);
+                if sig == libc::SIGHUP {
+                    log("reload: re-listing network shares");
+                    let _ = reload.send(());
+                    continue;
+                }
+                log("stopping: saving index");
+                save_snapshot(&ix);
+                std::process::exit(0);
+            }
         });
     }
 }
@@ -106,6 +116,56 @@ fn rescan(excludes: &[PathBuf]) -> Index {
     ix
 }
 
+/// Swap in a fresh scan of the local disks, carrying the network shares over from the old index:
+/// they're re-listed on their own schedule (refresh_shares), not by a local rescan.
+fn swap_in(ix: &RwLock<Index>, mut fresh: Index, excludes: &[PathBuf]) {
+    let mut w = ix.write().unwrap();
+    for s in network_shares(excludes) {
+        if let Some(id) = w.root_id(&s) {
+            fresh.graft(&w, id);
+        }
+    }
+    *w = fresh;
+}
+
+/// How often network shares are re-listed (KESTREL_SHARE_SECS overrides, for tests).
+fn share_every() -> std::time::Duration {
+    let secs = std::env::var("KESTREL_SHARE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(3 * 3600);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Network shares send no change events: list each one now, then every share_every() or on SIGHUP.
+/// A share that isn't mounted or fails partway keeps its last listing (a laptop away from home
+/// keeps finding what's on the NAS).
+fn refresh_shares(ix: Arc<RwLock<Index>>, excludes: Vec<PathBuf>, changes: Arc<std::sync::atomic::AtomicU64>, wake: std::sync::mpsc::Receiver<()>) {
+    loop {
+        for s in network_shares(&excludes) {
+            // reading the folder lets an automount (x-systemd.automount) mount it
+            let _ = std::fs::read_dir(&s);
+            if !network_mounted(&s) {
+                log(format_args!("{}: not mounted, keeping its last listing", s.display()));
+                continue;
+            }
+            let t = Instant::now();
+            let mut fresh = Index::default();
+            // ponytail: a few unreadable folders are normal; more means the share dropped mid-scan
+            match kestrel_index::scan::scan_share(&mut fresh, &s, &excludes) {
+                Ok(st) if st.errors <= 10 && fresh.root_id(&s).is_some() => {
+                    let mut w = ix.write().unwrap();
+                    w.remove_root(&s);
+                    w.graft(&fresh, fresh.root_id(&s).unwrap());
+                    drop(w);
+                    changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    log(format_args!("share {}: {} entries in {:.1?} ({} errors)", s.display(), st.entries, t.elapsed(), st.errors));
+                }
+                Ok(st) => log(format_args!("share {}: {} folders unreadable, keeping its last listing", s.display(), st.errors)),
+                Err(e) => log(format_args!("share {}: {e}, keeping its last listing", s.display())),
+            }
+        }
+        let _ = wake.recv_timeout(share_every());
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let watch = !args.iter().any(|a| a == "--no-watch");
@@ -123,7 +183,8 @@ fn main() {
     // answer on the socket right away. Last run's snapshot makes search work immediately; without
     // one, the index has epoch 0 = "indexing" until the first scan lands.
     let ix = Arc::new(RwLock::new(Index::default()));
-    handle_shutdown(ix.clone());
+    let (reload_tx, reload_rx) = std::sync::mpsc::channel();
+    handle_shutdown(ix.clone(), reload_tx);
     let t = Instant::now();
     match kestrel_index::snapshot::load(&state_file()) {
         Ok(mut snap) => {
@@ -161,12 +222,14 @@ fn main() {
     let (ix2, excludes2, changes2) = (ix.clone(), excludes.clone(), changes.clone());
     std::thread::spawn(move || {
         let fresh = rescan(&excludes2);
-        *ix2.write().unwrap() = fresh;
+        swap_in(&ix2, fresh, &excludes2);
         changes2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(fan) = fan {
             watch_loop(fan, ix2, excludes2, changes2);
         }
     });
+    let (ix4, excludes4, changes4) = (ix.clone(), excludes.clone(), changes.clone());
+    std::thread::spawn(move || refresh_shares(ix4, excludes4, changes4, reload_rx));
     // periodic save, so a crash or power cut loses at most SAVE_EVERY of changes
     let (ix3, changes3) = (ix.clone(), changes.clone());
     std::thread::spawn(move || {
@@ -187,8 +250,9 @@ fn main() {
 // ponytail: scans a new drive under the write lock; queries wait for it (~1 s per 100k files).
 fn sync_mounts(fan: &mut fan::Fan, ix: &RwLock<Index>, excludes: &[PathBuf]) {
     let now = local_mounts(excludes);
+    let shares = network_shares(excludes);
     let have: Vec<PathBuf> = ix.read().unwrap().roots().map(|r| PathBuf::from(std::ffi::OsStr::from_bytes(r))).collect();
-    for gone in have.iter().filter(|h| !now.contains(h)) {
+    for gone in have.iter().filter(|h| !now.contains(h) && !shares.contains(h)) {
         fan.forget(gone);
         if ix.write().unwrap().remove_root(gone) {
             log(format_args!("unmounted: {}", gone.display()));
@@ -219,7 +283,7 @@ fn lost_rescan_gap() -> std::time::Duration {
 /// Swap in a full rescan, then reconcile drives: the scan only saw what was mounted when it began,
 /// so a drive unplugged meanwhile would come back and one plugged in meanwhile would vanish.
 fn install(fresh: Index, fan: &mut fan::Fan, ix: &RwLock<Index>, excludes: &[PathBuf]) {
-    *ix.write().unwrap() = fresh;
+    swap_in(ix, fresh, excludes);
     sync_mounts(fan, ix, excludes);
 }
 

@@ -634,3 +634,12 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   available" with Download (opens the release page). Preferences › System › Check for updates (on by default);
   the day is stamped before the request, so a failure or a second window waits a day too. No curl or offline:
   silent. curl added to the .deb/.rpm/Arch dependencies.
+- **v0.9.37 (2026-11-01): NAS indexing** (Alex). Network shares (cifs/smb3/nfs/nfs4) in `/etc/fstab` whose
+  options include `x-kestrel` are indexed by a separate thread (indexd `refresh_shares`): it reads the mount point
+  (triggers an x-systemd.automount), checks /proc/self/mounts that a network fs is really there, lists the share
+  into a scratch Index without holding the lock, then swaps it in (`remove_root` + `Index::graft`). Every 3 h
+  (KESTREL_SHARE_SECS) and on SIGHUP (`ExecReload`, `systemctl reload kestrel-indexd`). Not mounted or more than
+  10 unreadable folders = keep the last listing (offline NAS stays searchable). Local full rescans carry the share
+  roots over (`swap_in` grafts them into the fresh index); `sync_mounts` never drops them. Opt-in, because Alex's
+  fstab already has a Sabrent NFS share over Tailscale that shouldn't be walked every 3 h. gvfs shares can't be
+  indexed: /run/user/UID/gvfs is the user's FUSE mount, root can't read it.

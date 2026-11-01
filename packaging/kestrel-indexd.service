@@ -4,6 +4,8 @@ After=local-fs.target
 
 [Service]
 ExecStart=/usr/bin/kestrel-indexd
+# re-list network shares now (they are otherwise re-listed every 3 hours)
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RuntimeDirectory=kestrel
 RuntimeDirectoryMode=0755

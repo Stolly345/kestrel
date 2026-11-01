@@ -57,6 +57,44 @@ pub fn local_mounts(excludes: &[PathBuf]) -> Vec<PathBuf> {
     v
 }
 
+/// Network filesystems send no change events, so they're re-listed on a timer instead of watched.
+pub const NETWORK_FS: &[&str] = &["cifs", "smb3", "nfs", "nfs4"];
+
+/// Network shares in /etc/fstab that opt in with the `x-kestrel` option (systemd ignores `x-`
+/// options; KESTREL_FSTAB overrides the file), minus excludes. Opt-in: a big share over a VPN
+/// shouldn't be re-listed every few hours unasked. None under
+/// KESTREL_ROOT unless KESTREL_FSTAB is set too, so tests never wander onto the real NAS.
+pub fn network_shares(excludes: &[PathBuf]) -> Vec<PathBuf> {
+    let file = match (std::env::var_os("KESTREL_FSTAB"), std::env::var_os("KESTREL_ROOT")) {
+        (Some(f), _) => PathBuf::from(f),
+        (None, Some(_)) => return Vec::new(),
+        (None, None) => PathBuf::from("/etc/fstab"),
+    };
+    shares_in(&std::fs::read_to_string(file).unwrap_or_default(), excludes)
+}
+
+fn shares_in(fstab: &str, excludes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = fstab
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>())
+        .filter(|f| f.len() >= 4 && !f[0].starts_with('#') && NETWORK_FS.contains(&f[2]))
+        .filter(|f| f[3].split(',').any(|o| o == "x-kestrel"))
+        .map(|f| PathBuf::from(unescape(f[1])))
+        .filter(|p| p.is_absolute() && !excluded(p, excludes))
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Is a network filesystem mounted at exactly `p` right now?
+pub fn network_mounted(p: &Path) -> bool {
+    std::fs::read_to_string("/proc/self/mounts").unwrap_or_default().lines().any(|l| {
+        let f: Vec<&str> = l.split(' ').collect();
+        f.len() >= 3 && NETWORK_FS.contains(&f[2]) && Path::new(&unescape(f[1])) == p
+    })
+}
+
 /// `/proc/mounts` escapes space, tab, newline, backslash as `\ooo`.
 fn unescape(s: &str) -> String {
     let b = s.as_bytes();
@@ -179,9 +217,19 @@ pub struct ScanStats {
 
 /// Index a whole filesystem rooted at `root` as a new root entry.
 pub fn scan(ix: &mut Index, root: &Path, excludes: &[PathBuf]) -> std::io::Result<ScanStats> {
+    scan_root(ix, root, excludes, true)
+}
+
+/// Index a network share: like `scan`, minus the tag and ACL lookups. Over SMB each is another
+/// round trip per file (it doubled a 169k-file NAS listing), and shares rarely carry either.
+pub fn scan_share(ix: &mut Index, root: &Path, excludes: &[PathBuf]) -> std::io::Result<ScanStats> {
+    scan_root(ix, root, excludes, false)
+}
+
+fn scan_root(ix: &mut Index, root: &Path, excludes: &[PathBuf], xattrs: bool) -> std::io::Result<ScanStats> {
     let m = std::fs::symlink_metadata(root)?;
     let id = push(ix, NO_PARENT, root.as_os_str().as_bytes(), Kind::Dir, &meta_of(&m, root));
-    let mut s = scan_under(ix, id, root, m.dev(), excludes);
+    let mut s = scan_under(ix, id, root, m.dev(), excludes, xattrs);
     s.entries += 1;
     Ok(s)
 }
@@ -214,7 +262,7 @@ struct Listing {
 
 /// Read and stat one folder. Subfolders on another filesystem or excluded are left out entirely
 /// (they're indexed as their own root, or deliberately skipped).
-fn list_dir(path: PathBuf, id: u32, dev: u64, excludes: &[PathBuf]) -> Listing {
+fn list_dir(path: PathBuf, id: u32, dev: u64, excludes: &[PathBuf], xattrs: bool) -> Listing {
     let mut items = Vec::new();
     let Ok(rd) = std::fs::read_dir(&path) else {
         return Listing { id, path, items, failed: true };
@@ -226,7 +274,8 @@ fn list_dir(path: PathBuf, id: u32, dev: u64, excludes: &[PathBuf]) -> Listing {
         if m.is_dir() && (m.dev() != dev || excluded(&child, excludes)) {
             continue;
         }
-        items.push((e.file_name(), kind(m.file_type()), meta_of(&m, &child)));
+        let meta = if xattrs { meta_of(&m, &child) } else { (&m).into() };
+        items.push((e.file_name(), kind(m.file_type()), meta));
     }
     Listing {
         id,
@@ -241,7 +290,7 @@ fn list_dir(path: PathBuf, id: u32, dev: u64, excludes: &[PathBuf]) -> Listing {
 /// Worker threads list folders; this thread files each listing into the index and hands the new
 /// subfolders back out as jobs. Nothing waits for tree order (jwalk did, buffering everything its
 /// threads had read ahead: ~600 MB at peak on 2M files), so only listings in flight are held.
-fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[PathBuf]) -> ScanStats {
+fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[PathBuf], xattrs: bool) -> ScanStats {
     use std::sync::{Arc, Mutex, mpsc};
     let mut stats = ScanStats::default();
     let (job_tx, job_rx) = mpsc::channel::<(PathBuf, u32)>();
@@ -255,7 +304,7 @@ fn scan_under(ix: &mut Index, dir_id: u32, dir: &Path, dev: u64, excludes: &[Pat
                 loop {
                     let job = rx.lock().unwrap().recv();
                     let Ok((path, id)) = job else { break };
-                    if tx.send(list_dir(path, id, dev, excludes)).is_err() {
+                    if tx.send(list_dir(path, id, dev, excludes, xattrs)).is_err() {
                         break;
                     }
                 }
@@ -325,7 +374,7 @@ pub fn reconcile(ix: &mut Index, path: &Path, fresh: bool, excludes: &[PathBuf])
     }
     let id = push(ix, dir, name, k, &meta);
     if k == Kind::Dir {
-        scan_under(ix, id, path, m.dev(), excludes);
+        scan_under(ix, id, path, m.dev(), excludes, true);
     }
 }
 
@@ -339,6 +388,42 @@ mod tests {
     fn mount_unescape() {
         assert_eq!(unescape(r"/media/my\040disk"), "/media/my disk");
         assert_eq!(unescape(r"/plain"), "/plain");
+    }
+
+    #[test]
+    fn fstab_network_shares() {
+        let fstab = "# //nas/x /mnt/old cifs\n\
+                     UUID=1 / ext4 defaults 0 1\n\
+                     //nas.local/alex /mnt/nas cifs credentials=/etc/x,x-systemd.automount,x-kestrel 0 0\n\
+                     srv:/export /mnt/my\\040nfs nfs4 x-kestrel 0 0\n\
+                     //nas/media /mnt/media cifs defaults,x-kestrelish 0 0\n\
+                     //nas/skip /mnt/skip cifs x-kestrel 0 0\n";
+        assert_eq!(
+            shares_in(fstab, &[PathBuf::from("/mnt/skip")]),
+            [PathBuf::from("/mnt/my nfs"), PathBuf::from("/mnt/nas")]
+        );
+    }
+
+    #[test]
+    fn graft_copies_a_share() {
+        let d = std::env::temp_dir().join(format!("kestrel-graft-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("Photos/2024")).unwrap();
+        fs::write(d.join("Photos/2024/beach.jpg"), "xyz").unwrap();
+        let mut share = Index::default();
+        scan(&mut share, &d, &[]).unwrap();
+        let mut ix = Index::default();
+        let id = share.root_id(&d).unwrap();
+        ix.graft(&share, id);
+        // a refresh: drop the old copy, graft the new listing
+        assert!(ix.remove_root(&d));
+        ix.graft(&share, id);
+        let q = Query::parse("beach.jpg").unwrap();
+        let hits = ix.search(&q, Sort::Name, false, None);
+        assert_eq!(hits.len(), 1, "old copy gone, one live copy");
+        assert_eq!(ix.path(hits[0]), d.join("Photos/2024/beach.jpg").as_os_str().as_bytes());
+        assert_eq!(ix.entries[hits[0] as usize].size, 3);
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
