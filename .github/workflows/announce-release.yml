@@ -184,7 +184,7 @@ jobs:
               except Exception as e:
                   print(f"::warning::image skipped ({src}): {e}")
 
-          args = ["-H", f"Idempotency-Key: {repo_full}@{tag}",
+          args = ["-H", f"Idempotency-Key: {repo_full}@{tag}#{os.environ['GITHUB_RUN_ID']}",
                   "--data-urlencode", f"status={toot}", "-d", "visibility=public"]
           for mid in media_ids:
               args += ["-d", f"media_ids[]={mid}"]
