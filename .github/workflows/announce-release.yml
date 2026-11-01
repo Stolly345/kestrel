@@ -1,0 +1,106 @@
+# Announce a release on Mastodon.
+#
+# Needs repo secret MASTODON_TOKEN (mastodon.social > Preferences > Development,
+# scope write:statuses). Same file in every repo; hashtags come from repo topics.
+#
+# Manual run (Actions tab > Announce release > Run workflow): leave the tag empty
+# for the latest release; tick dry_run to see the text without posting.
+
+name: Announce release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (empty = latest release)
+        required: false
+      dry_run:
+        description: Only print the post, don't publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    steps:
+      - name: Post to Mastodon
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
+          MASTODON_INSTANCE: https://mastodon.social
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, subprocess, urllib.parse, urllib.request
+
+          def gh(*args):
+              return json.loads(subprocess.run(["gh", "api", *args], check=True,
+                                               capture_output=True, text=True).stdout)
+
+          repo_full = os.environ["REPO"]
+          tag = os.environ["TAG"]
+          dry = os.environ["DRY_RUN"] == "true"
+          repo = gh(f"repos/{repo_full}")
+          rel = gh(f"repos/{repo_full}/releases/" + (f"tags/{tag}" if tag else "latest"))
+
+          name, tag = repo["name"], rel["tag_name"]
+          desc = (repo.get("description") or "").strip()
+          url = rel["html_url"]
+          notes = (rel.get("body") or "").strip()
+
+          # Plain-text summary of the notes: drop markdown headers/links/emphasis.
+          lines = []
+          for ln in notes.splitlines():
+              ln = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", ln)
+              ln = re.sub(r"[*_`]", "", ln).strip()
+              if ln and not ln.startswith("#"):
+                  lines.append(ln)
+
+          def camel(t):
+              return "".join(p.capitalize() if p.islower() else p for p in re.split(r"[-_]", t))
+          # Broad, well-followed tags first, then the repo's own topics.
+          pref = ["linux", "rust", "gtk4", "gnome", "libadwaita"]
+          topics = repo.get("topics", [])
+          topics = [t for t in pref if t in topics] + [t for t in topics if t not in pref]
+          tags = ["#" + camel(t) for t in topics[:5]] or ["#Linux"]
+          tags = " ".join(dict.fromkeys(tags + ["#OpenSource"]))
+
+          # Mastodon: 500 chars, links count as 23.
+          head = f"{name} {tag} is out. {desc}".strip()
+          budget = 500 - len(head) - 23 - len(tags) - 6
+          summary = ""
+          for ln in lines:
+              add = ("\n" if summary else "") + ln
+              if len(summary) + len(add) > budget:
+                  room = budget - len(summary) - 2
+                  if room > 60:  # cut the line at a word boundary rather than drop it
+                      summary += add[:room].rsplit(" ", 1)[0] + "…"
+                  break
+              summary += add
+          toot = "\n\n".join(p for p in [head, summary, url, tags] if p)
+
+          print("---- Mastodon ----\n" + toot + f"\n({len(toot) - len(url) + 23}/500 chars as Mastodon counts)")
+          if dry:
+              print("Dry run: nothing posted.")
+              raise SystemExit
+
+          if os.environ.get("MASTODON_TOKEN"):
+              req = urllib.request.Request(
+                  os.environ["MASTODON_INSTANCE"] + "/api/v1/statuses",
+                  data=urllib.parse.urlencode({"status": toot, "visibility": "public"}).encode(),
+                  headers={"Authorization": "Bearer " + os.environ["MASTODON_TOKEN"],
+                           "Idempotency-Key": f"{repo_full}@{tag}"})
+              with urllib.request.urlopen(req) as r:
+                  print("Mastodon:", json.load(r)["url"])
+          else:
+              print("::warning::MASTODON_TOKEN not set, skipped Mastodon")
+
+          EOF
