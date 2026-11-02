@@ -38,7 +38,7 @@ pub fn check(toasts: adw::ToastOverlay) {
         }
         let t = adw::Toast::builder()
             .title(format!("Kestrel {} is available", tag.trim_start_matches('v')))
-            .button_label("Download")
+            .button_label("View Release")
             .timeout(0)
             .build();
         t.connect_button_clicked(move |_| gtk::UriLauncher::new(&url).launch(None::<&gtk::Window>, None::<&gio::Cancellable>, |_| {}));
