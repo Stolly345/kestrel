@@ -8,6 +8,11 @@
 #
 # Manual run (Actions tab > Announce release > Run workflow): leave the tag empty
 # for the latest release; dry_run (on by default) shows the post without sending.
+#
+# Reddit has no posting token (its API needs Reddit's approval), so instead the
+# second step opens an issue with one pre-filled "submit" link per subreddit:
+# click, check, Post. Subreddits from the repo variable REDDIT_SUBREDDITS
+# (space-separated), else the list below. Close the issue when done.
 
 name: Announce release
 
@@ -26,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   announce:
@@ -33,6 +39,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     steps:
       - name: Post to Mastodon
+        id: mastodon
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -152,6 +159,14 @@ jobs:
               if len(images) == 4:
                   break
 
+          # what the Reddit step needs, written before anything can fail
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "release.json"), "w") as f:
+              json.dump({"app": app, "version": version, "tag": tag, "desc": desc, "url": url,
+                         "highlights": highlights, "pkgs": pkgs,
+                         # whole release-note bullets, for the Reddit comment
+                         "bullets": [plain(b.group(1)) for b in
+                                     (re.match(r"\s?[-*]\s+(.*)", ln) for ln in notes.splitlines()) if b]}, f)
+
           print(f"---- Mastodon post ({count(toot)}/500) ----\n{toot}\n---- images ----")
           for src, alt in images:
               print(f"{src}\n  alt: {alt}")
@@ -193,4 +208,62 @@ jobs:
           for mid in media_ids:
               args += ["-d", f"media_ids[]={mid}"]
           print("Posted:", curl(*args, f"{api}/v1/statuses")["url"], f"with {len(media_ids)} image(s)")
+          EOF
+
+      - name: Reddit links
+        # runs even when Mastodon failed, as long as the release was read
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          SUBREDDITS: ${{ vars.REDDIT_SUBREDDITS || 'linux rust opensource gnome fedora linuxapps' }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, subprocess, urllib.parse
+
+          path = os.path.join(os.environ["RUNNER_TEMP"], "release.json")
+          if not os.path.exists(path):
+              raise SystemExit("::error::the release couldn't be read, so there are no Reddit links")
+          r = json.load(open(path))
+          title = f"{r['app']} {r['version']}" + (f": {r['desc'].rstrip('.')}" if r["desc"] else "")
+          title = title if len(title) <= 300 else title[:299] + "…"  # Reddit's limit
+          comment = "\n".join(
+              [f"{r['app']} {r['version']} is out. What's new:", ""]
+              + [f"- {h}" for h in (r.get("bullets") or r["highlights"])]
+              + ([""] + [f"Packages: {' · '.join(r['pkgs'])}. Release notes and downloads: {r['url']}"] if r["pkgs"] else [""] + [r["url"]]))
+          q = urllib.parse.urlencode({"url": r["url"], "title": title})
+          subs = os.environ["SUBREDDITS"].replace(",", " ").split()
+          links = [f"- [ ] [r/{s.removeprefix('r/')}](https://www.reddit.com/r/{s.removeprefix('r/')}/submit?{q})" for s in subs]
+          body = "\n".join([
+              f"{r['app']} {r['version']} is released. Each link opens Reddit's new-post page with the title and link filled in; check it, then Post. Tick each one off, and close this issue when done.",
+              "",
+              "Read each subreddit's self-promotion rules first (several allow only some posts by the author of a project, or ask for a comment explaining it).",
+              "",
+              *links,
+              "",
+              "**Suggested first comment** (paste after posting):",
+              "",
+              "```",
+              comment,
+              "```",
+          ])
+          print(body)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(body + "\n")
+          if os.environ["DRY_RUN"] == "true":
+              print("Dry run: no issue opened.")
+              raise SystemExit
+          name = f"Share {r['app']} {r['version']} on Reddit"
+          have = subprocess.run(["gh", "issue", "list", "-R", os.environ["REPO"], "--state", "all",
+                                 "--search", f'"{name}" in:title', "--json", "title"],
+                                capture_output=True, text=True, check=True).stdout
+          if any(i["title"] == name for i in json.loads(have)):
+              print("Issue already exists:", name)
+              raise SystemExit
+          owner = os.environ["REPO"].split("/")[0]
+          out = subprocess.run(["gh", "issue", "create", "-R", os.environ["REPO"], "--title", name,
+                                "--body", body, "--assignee", owner],
+                               capture_output=True, text=True, check=True).stdout
+          print("Opened", out.strip())
           EOF
