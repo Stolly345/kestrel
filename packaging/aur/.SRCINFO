@@ -1,6 +1,6 @@
 pkgbase = kestrel-bin
 	pkgdesc = File manager with instant whole-disk search (Everything + Files for Linux)
-	pkgver = 0.9.36
+	pkgver = 0.9.37
 	pkgrel = 1
 	url = https://github.com/Stolly345/kestrel
 	install = kestrel-bin.install
@@ -32,6 +32,7 @@ pkgbase = kestrel-bin
 	optdepends = gst-plugins-ugly: more audio/video formats in the preview
 	optdepends = gst-libav: more audio/video formats in the preview
 	optdepends = gvfs-smb: Windows shares on the Network page
+	optdepends = cifs-utils: Index… on the Network page (search a NAS)
 	optdepends = xdg-terminal-exec: Open in Terminal uses your chosen terminal
 	optdepends = poppler: PDF page previews
 	optdepends = libreoffice-fresh: previews of Office documents
@@ -40,7 +41,7 @@ pkgbase = kestrel-bin
 	options = !debug
 	options = !strip
 	backup = etc/kestrel/excludes
-	source = https://github.com/Stolly345/kestrel/releases/download/v0.9.36/kestrel_0.9.36-1_amd64.deb
-	sha256sums = 2ff447c96474350588df24d965f9c219db649074f9220a6289d3acd6c0c4c33a
+	source = https://github.com/Stolly345/kestrel/releases/download/v0.9.37/kestrel_0.9.37-1_amd64.deb
+	sha256sums = 4692aee7d407ccaf96647c61f746841f6ec5d86d37a8151a8d0ea7dd63be389a
 
 pkgname = kestrel-bin
