@@ -223,11 +223,9 @@ pub fn set_icon(img: &gtk::Image, info: &gio::FileInfo) {
     if info.boolean("thumbnail::is-valid")
         && let Some(p) = info.attribute_byte_string("thumbnail::path")
     {
-        img.set_from_file(Some(p.as_str()));
-        img.add_css_class("thumb");
+        crate::thumbs::show(img, std::path::Path::new(p.as_str()));
         return;
     }
-    img.remove_css_class("thumb"); // rows are recycled
     match info.icon() {
         Some(i) => img.set_from_gicon(&i),
         None => img.set_icon_name(Some("text-x-generic")),

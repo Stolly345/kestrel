@@ -237,6 +237,25 @@ pub async fn get(info: &gio::FileInfo, size: Size, wanted: impl Fn() -> bool) ->
     r
 }
 
+/// Put the thumbnail at `p` into `img` with a hairline drawn on the picture itself, so a white page
+/// still reads at 16 px and the line hugs a landscape photo instead of the image's square slot.
+pub fn show(img: &gtk::Image, p: &std::path::Path) {
+    let scale = img.scale_factor().max(1);
+    let px = img.pixel_size().max(16) * scale;
+    let Ok(pb) = gdk_pixbuf::Pixbuf::from_file_at_scale(p, px, px, true) else {
+        img.set_from_file(Some(p));
+        return;
+    };
+    let pb = pb.add_alpha(false, 0, 0, 0).unwrap_or(pb);
+    let (w, h) = (pb.width(), pb.height());
+    // mid grey at half alpha: visible on light and dark backgrounds alike
+    for (x, y, sw, sh) in [(0, 0, w, scale), (0, h - scale, w, scale), (0, 0, scale, h), (w - scale, 0, scale, h)] {
+        pb.new_subpixbuf(x, y, sw.min(w), sh.min(h)).fill(0x8080_8080);
+    }
+    #[allow(deprecated)]
+    img.set_paintable(Some(&gtk::gdk::Texture::for_pixbuf(&pb)));
+}
+
 /// Fill `img` with a thumbnail once ready, unless it has been rebound to another file meanwhile.
 pub fn load_into(img: &gtk::Image, info: &gio::FileInfo) {
     if info.boolean("thumbnail::is-valid") || !can_thumbnail(info) {
@@ -252,8 +271,7 @@ pub fn load_into(img: &gtk::Image, info: &gio::FileInfo) {
         if let Some(p) = get(&info, Size::Large, wanted).await
             && wanted()
         {
-            img.set_from_file(Some(&p));
-            img.add_css_class("thumb"); // an outline, so a white page still reads at 16 px
+            show(&img, &p);
         }
     });
 }

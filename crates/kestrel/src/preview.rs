@@ -1313,6 +1313,8 @@ impl Preview {
             // drawn at the top (it's JSON, so text/plain would dump it here)
         } else if gio::content_type_is_a(&ct, "text/markdown") {
             // shown as a page at the top (and markdown is a text/plain, so it must stop here)
+        } else if ct == "application/pdf" || ct == "application/illustrator" || is_office(&ct) {
+            // paged at the top; an all-ASCII PDF would otherwise pass as text and dump its source here
         } else if let Some(p) = file.path() {
             // decided by the content, not the suffix: .vhd is a disk image or VHDL source, .ts MPEG
             // video or TypeScript, and GIO types many text formats (.pem, ASCII .dxf/.stl…) as

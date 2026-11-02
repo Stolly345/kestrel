@@ -55,7 +55,6 @@ const CSS: &str = "
 .pane tabbar tab button.image-button { min-width: 20px; min-height: 20px; }
 .pane tabbar .start-action, .pane tabbar .end-action { padding-top: 3px; padding-bottom: 3px; }
 .pane tabbar .end-action button { min-height: 24px; min-width: 24px; padding: 0; }
-image.thumb { outline: 1px solid alpha(currentColor, 0.25); outline-offset: -1px; border-radius: 2px; }
 .md-page, .md-page > viewport { background: #ffffff; color: #1e1e1e; }
 levelbar.usage block.used { background: @accent_bg_color; }
 levelbar.usage block.nearly-full { background: @error_bg_color; }
@@ -64,6 +63,8 @@ levelbar.usage block { min-height: 4px; }
 .inactive-pane tabbar, .inactive-pane .statusbar { opacity: 0.55; }
 .miller-col { border-right: 1px solid alpha(currentColor, 0.12); }
 .statusbar { min-height: 22px; }
+/* the terminal panel: text off the window edge, like every other view */
+vte-terminal { padding: 6px 10px; }
 .statusbar.error { color: @error_color; opacity: 1; }
 .location-bar { padding: 1px 6px; border-bottom: 1px solid alpha(currentColor, 0.08); min-height: 28px; }
 .location-bar .crumb { padding: 0 6px; min-height: 24px; }
