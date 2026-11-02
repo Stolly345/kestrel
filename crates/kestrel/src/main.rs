@@ -36,6 +36,10 @@ const CSS: &str = "
 .command-bar > .toolbar { padding: 1px 6px; }
 .command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
 .command-bar separator { margin: 5px 3px; }
+/* Search Syntax: the examples are what you click, so they carry the accent */
+.syntax-example { color: @accent_color; }
+/* greyed-out buttons read as off at a glance, not as a slightly lighter version of on */
+.command-bar button:disabled { filter: opacity(0.3); }
 /* command-bar sizes, picked by its width (window/mod.rs BAR_SIZES): large when there's room, compact
    (and then two rows) when there isn't */
 .command-bar.large button, .command-bar.large splitbutton > button, .command-bar.large menubutton > button { min-height: 34px; min-width: 40px; }

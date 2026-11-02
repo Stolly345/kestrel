@@ -92,6 +92,10 @@ struct Relabel(gtk::Widget);
 impl Drop for Relabel {
     fn drop(&mut self) {
         crate::label_icon_buttons(&self.0);
+        // the section heading just above the list: no heading over an empty list
+        if let Some(h) = self.0.prev_sibling() {
+            h.set_visible(self.0.first_child().is_some());
+        }
     }
 }
 
@@ -269,7 +273,9 @@ impl Sidebar {
         let tags = gtk::Box::builder().spacing(0).margin_start(8).margin_end(8).margin_bottom(4).build();
         for t in kestrel_index::TAGS {
             let b = crate::tags::dot_button(t);
-            b.set_tooltip_text(Some(&format!("Files tagged {t}")));
+            let what = format!("Files tagged {t}");
+            b.set_tooltip_text(Some(&what));
+            b.update_property(&[gtk::accessible::Property::Label(&what)]);
             let nav = navigate.clone();
             let q = format!("tag:{t}");
             b.connect_clicked(move |_| nav(Loc::Search(q.clone())));
@@ -323,6 +329,7 @@ impl Sidebar {
     }
 
     pub fn refresh_bookmarks(&self) {
+        let _relabel = Relabel(self.bookmarks.clone().upcast());
         while let Some(c) = self.bookmarks.first_child() {
             self.bookmarks.remove(&c);
         }

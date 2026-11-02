@@ -175,7 +175,7 @@ enum SearchState {
     Running,
     Done(crate::search::Outcome),
     BadQuery(String),
-    Down(String),
+    Down,
     Indexing,
 }
 
@@ -239,7 +239,6 @@ pub struct Browser {
     /// Window hooks: header refresh, selection changes (preview pane), daemon reachable or not.
     pub on_change: Hook<dyn Fn()>,
     pub on_select: Hook<dyn Fn()>,
-    pub on_daemon: Hook<dyn Fn(bool)>,
     ops: Rc<Ops>,
     me: Weak<Browser>,
 }
@@ -286,11 +285,10 @@ impl Browser {
                 row.append(
                     &gtk::Label::builder()
                         .xalign(0.0)
-                        .hexpand(true)
                         .ellipsize(gtk::pango::EllipsizeMode::Middle)
                         .build(),
                 );
-                // symlink badge; the status bar shows where it points
+                // symlink badge right after the name; the status bar shows where it points
                 row.append(&gtk::Image::builder().icon_name("emblem-symbolic-link").pixel_size(16).visible(false).build());
                 row.append(&gtk::Box::builder().spacing(3).build());
                 row.upcast()
@@ -325,7 +323,7 @@ impl Browser {
                 .sorter(&sorter)
                 .resizable(true)
                 .build();
-            // Name/Folder: a floor width, then take the rest; narrow panes scroll sideways instead of squashing names
+            // Name: a floor width, then takes the rest; narrow panes scroll sideways instead of squashing names
             c.set_fixed_width(if width > 0 { width } else { 220 });
             c.set_expand(width <= 0);
             c
@@ -340,7 +338,8 @@ impl Browser {
             "Folder",
             label_factory(&me, 0.0, |i| i.attribute_string("kestrel::dir").map(|s| tilde(&s)).unwrap_or_default()),
             gtk::CustomSorter::new(|a, b| cmp(info_of(a).attribute_string("kestrel::dir"), info_of(b).attribute_string("kestrel::dir"))),
-            0,
+            // fixed, not expanding: Name gets the spare width, so names that differ late stay readable
+            200,
         );
         dir_col.set_visible(false);
         let size_col = col(
@@ -607,7 +606,6 @@ impl Browser {
             page: RefCell::default(),
             on_change: RefCell::default(),
             on_select: RefCell::default(),
-            on_daemon: RefCell::default(),
             ops,
             me,
         }
@@ -1255,7 +1253,21 @@ impl Browser {
             self.apply_pending_select();
         }
         if let Some(e) = self.dirlist.error() {
-            self.show_status("dialog-error-symbolic", "Can't open this folder", &human_gio(&e));
+            // say which folder and why, then offer the way out
+            let d = self.dir.borrow().clone();
+            let where_ = d.path().map_or_else(|| d.uri().to_string(), |p| tilde(&p.to_string_lossy()));
+            self.show_status("dialog-error-symbolic", "Can't open this folder", &format!("{}: {where_}.", human_gio(&e)));
+            let (label, action) = if self.can_back() { ("Go Back", "win.back") } else { ("Open Parent Folder", "win.up") };
+            if d.parent().is_some() || self.can_back() {
+                self.status.set_child(Some(
+                    &gtk::Button::builder()
+                        .label(label)
+                        .action_name(action)
+                        .halign(gtk::Align::Center)
+                        .css_classes(["pill"])
+                        .build(),
+                ));
+            }
         } else if self.dir_sel.n_items() == 0 && !self.dirlist.is_loading() && self.mode.get() != Mode::Columns {
             self.show_status("folder-symbolic", "Folder is empty", "");
         } else {
@@ -1331,8 +1343,8 @@ impl Browser {
         self.loc_label.set_visible(true);
         let local = self.dir.borrow().path().is_some();
         self.loc_label.set_label(match self.scope.get() {
-            Scope::Everywhere => "Searching everywhere — started from",
-            _ if !local => "Searching everywhere (this location isn't indexed) — from",
+            Scope::Everywhere => "Searching everywhere, from",
+            _ if !local => "Searching everywhere (this location isn't indexed), from",
             Scope::Folder => "Searching in",
             Scope::FolderOnly => "Searching only in",
         });
@@ -1374,6 +1386,7 @@ impl Browser {
         if icon == "dialog-error-symbolic" {
             eprintln!("folder error: {title}: {desc}"); // scripts/ui-check.sh fails on these
         }
+        self.status.set_child(None::<&gtk::Widget>);
         self.status.set_icon_name(Some(icon));
         self.status.set_title(title);
         self.status.set_description(Some(desc).filter(|d| !d.is_empty()));
@@ -1453,10 +1466,8 @@ impl Browser {
                     self.statusbar.add_css_class("error");
                     format!("Query error: {e}")
                 }
-                SearchState::Down(e) => {
-                    self.statusbar.add_css_class("error");
-                    e
-                }
+                // the page itself says it and offers the fix; no second alarm down here
+                SearchState::Down => "Search is off".to_string(),
             }
         } else {
             let n = self.dir_sel.n_items();

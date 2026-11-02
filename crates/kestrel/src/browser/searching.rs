@@ -84,7 +84,6 @@ impl Browser {
             if !b.is_searching() {
                 return;
             }
-            let daemon_ok = !matches!(r, Err(SearchError::Down(_)));
             match r {
                 Ok(o) => {
                     *b.search_state.borrow_mut() = SearchState::Done(o);
@@ -119,20 +118,24 @@ impl Browser {
                         }
                     });
                 }
-                Err(SearchError::Down(e)) => {
+                Err(SearchError::Down(_)) => {
                     b.show_status(
                         "network-offline-symbolic",
                         "Search is off",
-                        "Kestrel's search service isn't running. Press Start Service above to turn it on.",
+                        "Kestrel's search service isn't running, so nothing can be found yet.",
                     );
-                    *b.search_state.borrow_mut() = SearchState::Down(e);
+                    b.status.set_child(Some(
+                        &gtk::Button::builder()
+                            .label("Start Search Service")
+                            .action_name("win.start-service")
+                            .halign(gtk::Align::Center)
+                            .css_classes(["pill", "suggested-action"])
+                            .build(),
+                    ));
+                    *b.search_state.borrow_mut() = SearchState::Down;
                 }
             }
             b.update_status();
-            let cb = b.on_daemon.borrow().clone();
-            if let Some(cb) = cb {
-                cb(daemon_ok);
-            }
         });
     }
 

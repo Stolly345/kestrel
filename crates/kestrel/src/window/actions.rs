@@ -21,6 +21,8 @@ impl Win {
                 Win::new(&app, vec![loc], vec![], false).window.present();
             }
         });
+        // the "Search is off" page's button
+        self.act("start-service", |w| w.start_service());
         self.act("back", |w| w.current().into_iter().for_each(|b| b.back()));
         self.act("forward", |w| w.current().into_iter().for_each(|b| b.forward()));
         self.act("up", |w| w.current().into_iter().for_each(|b| b.up()));
@@ -217,15 +219,33 @@ impl Win {
             }
         });
         self.act("syntax", |w| {
-            let d = adw::AlertDialog::new(Some("Search syntax"), None);
-            let l = gtk::Label::builder()
-                .label(SYNTAX)
-                .css_classes(["monospace"])
-                .xalign(0.0)
-                .selectable(true)
-                .build();
-            d.set_extra_child(Some(&l));
-            d.add_response("ok", "OK");
+            let page = adw::PreferencesPage::new();
+            let tv = adw::ToolbarView::new();
+            tv.add_top_bar(&adw::HeaderBar::new());
+            tv.set_content(Some(&page));
+            let d = adw::Dialog::builder().title("Search Syntax").child(&tv).content_width(560).content_height(640).build();
+            for (i, (group, rows)) in SYNTAX.iter().enumerate() {
+                let g = adw::PreferencesGroup::builder().title(*group).build();
+                if i == 0 {
+                    g.set_description(Some("Click an example to add it to the search box. Ctrl+F searches just this folder."));
+                }
+                for (ex, meaning) in rows.iter() {
+                    let row = adw::ActionRow::builder().title(*meaning).activatable(true).tooltip_text("Add to the search box").build();
+                    row.add_prefix(&gtk::Label::builder().label(*ex).xalign(0.0).width_chars(16).css_classes(["monospace", "syntax-example"]).build());
+                    let (me, d) = (w.me.clone(), d.downgrade());
+                    let ex = ex.to_string();
+                    row.connect_activated(move |_| {
+                        let Some(w) = me.upgrade() else { return };
+                        d.upgrade().into_iter().for_each(|d| {
+                            d.close();
+                        });
+                        let sep = if w.bar.entry.text().trim().is_empty() { "" } else { " " };
+                        w.focus_search(Some(&format!("{sep}{ex}")));
+                    });
+                    g.add(&row);
+                }
+                page.add(&g);
+            }
             d.present(Some(&w.window));
         });
         self.act("about", |w| {

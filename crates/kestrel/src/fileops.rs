@@ -656,8 +656,10 @@ impl Ops {
         }
         body += "\n\nReplaced items go to the trash, so Undo can bring them back.";
         let d = adw::AlertDialog::new(Some(&heading), Some(&body));
-        d.add_responses(&[("cancel", "Cancel"), ("skip", "Skip"), ("keep", "Keep Both"), ("replace", "Replace")]);
+        // the safe choice leads: last added sits rightmost, or on top when the buttons stack
+        d.add_responses(&[("cancel", "Cancel"), ("skip", "Skip"), ("replace", "Replace"), ("keep", "Keep Both")]);
         d.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
+        d.set_response_appearance("keep", adw::ResponseAppearance::Suggested);
         d.set_default_response(Some("keep"));
         d.set_close_response("cancel");
         d.connect_response(None, move |_, r| {

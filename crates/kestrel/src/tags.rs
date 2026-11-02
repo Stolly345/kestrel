@@ -100,7 +100,9 @@ pub fn picker(pick: impl Fn(&str) + Clone + 'static) -> gtk::Box {
     let row = gtk::Box::builder().spacing(2).halign(gtk::Align::Center).css_classes(["tag-picker"]).build();
     for t in TAGS {
         let b = dot_button(t);
-        b.set_tooltip_text(Some(&format!("Tag {}", title(t))));
+        let what = format!("Tag {}", title(t));
+        b.set_tooltip_text(Some(&what));
+        b.update_property(&[gtk::accessible::Property::Label(&what)]);
         let p = pick.clone();
         b.connect_clicked(move |_| p(t));
         row.append(&b);

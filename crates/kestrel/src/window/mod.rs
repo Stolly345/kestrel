@@ -85,16 +85,21 @@ pub fn new_menu() -> gio::Menu {
 /// Below the first: two compact rows. One row measures 583 px compact, 783 normal, 1081 large; each
 /// step leaves room for Extract; anything that still doesn't fit scrolls.
 const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1140, "large")];
+/// Wider still (large row + about 240 px): Pin, Compress, Extract and View, the glyphs nobody can
+/// guess, get their names beside them.
+const BAR_LABELS_AT: u32 = 1380;
 
 pub struct Pane {
     pub root: gtk::Box,
     pub view: adw::TabView,
+    bar: adw::TabBar,
 }
 
 impl Pane {
     fn new() -> Pane {
         let view = adw::TabView::builder().vexpand(true).build();
-        let bar = adw::TabBar::builder().view(&view).autohide(false).build();
+        // one tab, one pane: the strip only repeats the breadcrumb, so it hides (Ctrl+T still opens tabs)
+        let bar = adw::TabBar::builder().view(&view).autohide(true).build();
         bar.set_end_action_widget(Some(
             &gtk::Button::builder()
                 .icon_name("tab-new-symbolic")
@@ -107,7 +112,7 @@ impl Pane {
         root.add_css_class("pane");
         root.append(&bar);
         root.append(&view);
-        Pane { root, view }
+        Pane { root, view, bar }
     }
 
     pub fn current(&self) -> Option<Rc<Browser>> {
@@ -141,7 +146,6 @@ pub struct Win {
     active: Cell<usize>,
     pub ops: Rc<Ops>,
     bar: SearchBar,
-    banner: adw::Banner,
     back_btn: gtk::Button,
     fwd_btn: gtk::Button,
     up_btn: gtk::Button,
@@ -327,11 +331,6 @@ impl Win {
             setting: Cell::new(false),
             debounce: RefCell::default(),
         };
-        let banner = adw::Banner::builder()
-            .title("Search is off: the search service isn't running.")
-            .button_label("Start Service")
-            .revealed(false)
-            .build();
 
         // the whole row is one title widget: AdwHeaderBar centres a title between equal-width sides, so a
         // search box there could never reach the up arrow. Here it fills from the arrows to the end buttons.
@@ -461,6 +460,19 @@ impl Win {
             named(b.upcast_ref(), tip);
             b
         };
+        // the unclear glyphs carry a name that a wide bar shows; the inner button keeps image-button
+        // padding so the measured widths above still hold while the name is hidden
+        let names: RefCell<Vec<gtk::Label>> = RefCell::default();
+        // (set_child drops GTK's own image-button class, so it goes back on afterwards)
+        let with_name = |outer: &gtk::Widget, inner: Option<gtk::Widget>, icon: &str, text: &str| {
+            let b = gtk::Box::builder().spacing(6).build();
+            b.append(&gtk::Image::from_icon_name(icon));
+            let l = gtk::Label::builder().label(text).visible(false).build();
+            b.append(&l);
+            names.borrow_mut().push(l);
+            outer.set_property("child", &b);
+            inner.into_iter().for_each(|i| i.add_css_class("image-button"));
+        };
         // contextual buttons are shown only while they apply
         let contextual = |w: &gtk::Widget| _ = w.bind_property("sensitive", w, "visible").sync_create().build();
 
@@ -481,7 +493,9 @@ impl Win {
         r.append(&button("edit-undo-symbolic", "win.undo", "Undo (Ctrl+Z)"));
         r.append(&button("edit-redo-symbolic", "win.redo", "Redo (Ctrl+Shift+Z)"));
         r.append(&sep());
-        r.append(&button("view-pin-symbolic", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)"));
+        let pin = button("view-pin-symbolic", "win.add-bookmark", "Pin to the sidebar (Ctrl+D)");
+        with_name(pin.upcast_ref(), Some(pin.clone().upcast()), "view-pin-symbolic", "Pin");
+        r.append(&pin);
         r.append(&button("edit-cut-symbolic", "win.cut", "Cut (Ctrl+X)"));
         r.append(&split_btn(
             "edit-copy-symbolic",
@@ -502,7 +516,9 @@ impl Win {
         r.append(&button("document-edit-symbolic", "win.rename", "Rename (F2)"));
         r.append(&sep());
         // Archive: Compress always; Extract while an archive is selected (Explorer's Extract tab)
-        r.append(&button("package-x-generic-symbolic", "win.compress", "Compress into a zip, 7z or tar…"));
+        let compress = button("package-x-generic-symbolic", "win.compress", "Compress into a zip, 7z or tar…");
+        with_name(compress.upcast_ref(), Some(compress.clone().upcast()), "package-x-generic-symbolic", "Compress");
+        r.append(&compress);
         let extract = split_btn(
             "folder-download-symbolic",
             "win.extract",
@@ -510,6 +526,7 @@ impl Win {
             "Extract options",
             &menu(&[("Extract Here", "win.extract"), ("Extract To…", "win.extract-to"), ("Browse Archive", "win.browse-archive")]),
         );
+        with_name(extract.upcast_ref(), extract.first_child(), "folder-download-symbolic", "Extract");
         // a split button stays sensitive itself (only its inner button greys), so follow the action
         let e = extract.clone();
         window.connect_action_enabled_changed(Some("extract"), move |_, _, on| e.set_visible(on));
@@ -532,7 +549,9 @@ impl Win {
             r.append(&b);
         }
         r.append(&sep());
-        r.append(&menu_btn("view-grid-symbolic", "View", &view_menu));
+        let view = menu_btn("view-grid-symbolic", "View", &view_menu);
+        with_name(view.upcast_ref(), view.first_child(), "view-grid-symbolic", "View");
+        r.append(&view);
 
         // one row when there's room (a maximised window), else two. The bin measures its own width,
         // so the sidebar and preview pane count too.
@@ -551,12 +570,18 @@ impl Win {
         let cmd_bar = adw::BreakpointBin::builder().width_request(1).height_request(1).child(&cmd_scroll).build();
         // narrowest: two compact rows; wider, one row that grows (the last matching breakpoint wins)
         cmd.add_css_class("compact");
-        for (width, size) in BAR_SIZES {
+        for (width, size) in BAR_SIZES.into_iter().chain([(BAR_LABELS_AT, "large")]) {
             let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("min-width: {width}sp")).unwrap());
             let classes: Vec<&str> = ["command-bar", size].into_iter().filter(|c| !c.is_empty()).collect();
             bp.add_setter(&cmd, "css-classes", Some(&classes.to_value()));
             bp.add_setter(&cmd, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
             bp.add_setter(&row_sep, "visible", Some(&true.to_value()));
+            // only one breakpoint applies at a time, so the widest repeats the large setters above
+            if width == BAR_LABELS_AT {
+                for l in names.borrow().iter() {
+                    bp.add_setter(l, "visible", Some(&true.to_value()));
+                }
+            }
             cmd_bar.add_breakpoint(bp);
         }
         hrow.append(&row);
@@ -565,7 +590,6 @@ impl Win {
         let main = adw::ToolbarView::new();
         main.add_top_bar(&header);
         main.add_top_bar(&cmd_bar);
-        main.add_top_bar(&banner);
         main.add_top_bar(&bar.chips);
         // file-operation progress: what's running, how far, time left, Cancel
         main.add_bottom_bar(&ops.bar);
@@ -604,7 +628,6 @@ impl Win {
             active: Cell::new(0),
             ops,
             bar,
-            banner,
             back_btn,
             fwd_btn,
             up_btn,
@@ -678,12 +701,6 @@ impl Win {
             }
         }));
         let me = self.me.clone();
-        *b.on_daemon.borrow_mut() = Some(Rc::new(move |ok| {
-            if let Some(w) = me.upgrade() {
-                w.banner.set_revealed(!ok);
-            }
-        }));
-        let me = self.me.clone();
         let bw = Rc::downgrade(b);
         *b.on_select.borrow_mut() = Some(Rc::new(move || {
             if let (Some(w), Some(b)) = (me.upgrade(), bw.upgrade())
@@ -697,6 +714,10 @@ impl Win {
 
     pub fn set_dual(&self, on: bool) {
         self.panes[1].root.set_visible(on);
+        // side by side, the tab strips are what tell the two panes apart
+        for p in &self.panes {
+            p.bar.set_autohide(!on);
+        }
         if on && self.panes[1].view.n_pages() == 0 {
             let loc = self.current().map_or_else(|| gio::File::for_path(glib::home_dir()), |b| b.base_dir());
             let keep = self.active.get();
@@ -831,7 +852,7 @@ impl Win {
     }
 
     /// Start the daemon through polkit, then retry the current search.
-    fn start_service(&self) {
+    pub(super) fn start_service(&self) {
         let me = self.me.clone();
         glib::spawn_future_local(async move {
             let ok = gio::spawn_blocking(|| {
@@ -850,7 +871,6 @@ impl Win {
             // the first scan takes a few seconds before the socket appears
             for _ in 0..60 {
                 if std::os::unix::net::UnixStream::connect(kestrel_index::proto::socket_path()).is_ok() {
-                    w.banner.set_revealed(false);
                     if let Some(b) = w.current() {
                         b.reload();
                     }
@@ -1105,12 +1125,6 @@ impl Win {
                 b.set_scope(Scope::ALL[d.selected().min(2) as usize]);
             }
         });
-        let me = self.me.clone();
-        self.banner
-            .connect_button_clicked(move |_| me.upgrade().into_iter().for_each(|w| w.start_service()));
-        if std::os::unix::net::UnixStream::connect(kestrel_index::proto::socket_path()).is_err() {
-            self.banner.set_revealed(true);
-        }
 
         let me = self.me.clone();
         self.window.connect_close_request(move |_| {
@@ -1137,13 +1151,59 @@ impl Win {
     }
 }
 
-pub const SYNTAX: &str = "a b        both          a|b       either        !a      not
-\"a b\"      literal       *.rs      wildcard (whole name)
-a/b        path match    path:x    path match    case:X  case-sensitive
-regex:^x   file:  folder:   ext:pdf;docx
-size:>1gb  size:1mb..10mb  size:empty|tiny|small|medium|large|huge|gigantic
-dm:today|yesterday|thisweek|thismonth|thisyear|last7days|2026-10|>2026-10-01
-audio:  video:  pic:  doc:  zip:  exe:
-diagram:  cad:  gis:  data:  cert:  lib:  code:  font:
-
-Ctrl+F searches inside the current folder.";
+/// Search Syntax help: (group, [(example, meaning)]). Every example is a working query.
+pub const SYNTAX: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Combine words",
+        &[
+            ("invoice 2026", "Both words, in any order"),
+            ("jpg|png", "Either word"),
+            ("!draft", "Leave out names with this word"),
+            ("\"tax return\"", "These words together, space included"),
+        ],
+    ),
+    (
+        "Match names",
+        &[
+            ("*.rs", "Wildcards match the whole name"),
+            ("photos/2026", "A slash matches anywhere in the full path"),
+            ("case:README", "Upper and lower case must match"),
+            ("regex:^IMG_\\d+", "Regular expression"),
+        ],
+    ),
+    (
+        "Kind",
+        &[
+            ("file:", "Only files"),
+            ("folder:", "Only folders"),
+            ("ext:pdf;docx", "These extensions"),
+            ("pic:", "Pictures. Also audio: video: doc: zip: exe: code: font:"),
+            ("tag:red", "Tagged red"),
+        ],
+    ),
+    (
+        "Size",
+        &[
+            ("size:>1gb", "Bigger than 1 GB"),
+            ("size:1mb..10mb", "Between two sizes"),
+            ("size:empty", "Also tiny, small, medium, large, huge, gigantic"),
+        ],
+    ),
+    (
+        "Date modified",
+        &[
+            ("dm:today", "Also yesterday, thisweek, thismonth, thisyear"),
+            ("dm:last7days", "The last 7 days. Also weeks, months, years"),
+            ("dm:2026-10", "A year, month or day"),
+            ("dm:>2026-10-01", "After a date"),
+        ],
+    ),
+    (
+        "Contents",
+        &[
+            ("content:invoice", "Text inside files (slower)"),
+            ("dupe:", "Files that share a name with another file"),
+            ("empty:", "Empty folders"),
+        ],
+    ),
+];

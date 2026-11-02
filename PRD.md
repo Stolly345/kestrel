@@ -109,7 +109,7 @@ What carries forward unchanged: the index engine, the query language, the daemon
 - **Columns:** Name (with matched text highlighted), Folder, Size, Modified, Type, plus Tags and Git when relevant. Sorting is done by the daemon, so it's instant at any size.
 - **Live summary in the status bar:** "N results · total size · query time", or the query error in red with where it went wrong.
 - **Filter chips** under the results: Type (Folders, Documents, Pictures, Audio, Video, Archives, Executables), Date modified, Size. A chip just adds or removes query terms, and the box shows the resulting text so it can be edited. Chips and syntax are two views of the same query.
-- **Empty and error states:** "No results" offers to widen the scope. If the daemon is down, there's a clear banner with a *Start service* action (via `pkexec systemctl start kestrel-indexd`).
+- **Empty and error states:** "No results" offers to widen the scope. If the daemon is down, the search page says so and offers a *Start Search Service* button (via `pkexec systemctl start kestrel-indexd`).
 - **Large result sets:** a million hits scroll smoothly through lazy paging, which v0.1 already does.
 
 ### 6.4 Search assistance
@@ -158,7 +158,7 @@ Priority: **P0** = v1 can't ship without it · **P1** = v1 should have it · **P
 | S12 | Recent searches when the box is empty and focused; saved searches (Ctrl+D) in the sidebar | P1 | |
 | S13 | Syntax cheat sheet popover from a "?" button in the box | P1 | |
 | S14 | Results sorted by any column instantly (daemon-side) | P0 | |
-| S15 | "Daemon not running" banner with a start action | P0 | |
+| S15 | "Daemon not running" page with a start button | P0 | |
 
 ### 7.2 Index & daemon (exists; P0 items need verifying)
 | ID | Requirement | Pri | Acceptance |
