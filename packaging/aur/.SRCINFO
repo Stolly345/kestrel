@@ -1,6 +1,6 @@
 pkgbase = kestrel-bin
 	pkgdesc = File manager with instant whole-disk search (Everything + Files for Linux)
-	pkgver = 0.9.37
+	pkgver = 0.9.38
 	pkgrel = 1
 	url = https://github.com/Stolly345/kestrel
 	install = kestrel-bin.install
@@ -41,7 +41,7 @@ pkgbase = kestrel-bin
 	options = !debug
 	options = !strip
 	backup = etc/kestrel/excludes
-	source = https://github.com/Stolly345/kestrel/releases/download/v0.9.37/kestrel_0.9.37-1_amd64.deb
-	sha256sums = 4692aee7d407ccaf96647c61f746841f6ec5d86d37a8151a8d0ea7dd63be389a
+	source = https://github.com/Stolly345/kestrel/releases/download/v0.9.38/kestrel_0.9.38-1_amd64.deb
+	sha256sums = 43b347efd89795bdc4662e215536359f076b5c41d8d5056a2640e2f89836c485
 
 pkgname = kestrel-bin
