@@ -8,6 +8,10 @@
 | Stack | Rust, GTK4 + libadwaita, root index daemon (fanotify), `.deb` + `.rpm` (0.9.35: also Debian 13+, Fedora 40+, openSUSE Tumbleweed) |
 | Supersedes | The scope sections of `PLAN.md` (that file stays as the engineering log) |
 
+![Kestrel social preview](docs/social-preview.png)
+
+*GitHub social preview (1280×640), made by `scripts/social-preview.py` from the icon and `docs/screenshots/kestrel.png`; uploaded by hand in Settings → General → Social preview.*
+
 ---
 
 ## 1. Problem
@@ -657,4 +661,5 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   fstab shares the caller can open (Index::can_open on the share root). Network › Indexed Shares subtitles poll it
   every 2 s while the group is mapped (spawn_blocking; timer stops when the page is gone): "/mnt/nas · Listing…
   20,483 items so far", "· 182,200 items · listed today at 10:52", "· Can't be reached · searching the listing from …".
-
+- **0.9.37 follow-up (2026-11-02): social preview.** `scripts/social-preview.py` writes `docs/social-preview.png` (icon, name,
+  tagline, three points, screenshot); rerun after the screenshot or tagline changes and re-upload (GitHub has no API for it).
