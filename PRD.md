@@ -663,3 +663,11 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   20,483 items so far", "· 182,200 items · listed today at 10:52", "· Can't be reached · searching the listing from …".
 - **0.9.37 follow-up (2026-11-02): social preview.** `scripts/social-preview.py` writes `docs/social-preview.png` (icon, name,
   tagline, three points, screenshot); rerun after the screenshot or tagline changes and re-upload (GitHub has no API for it).
+- **v0.9.38 (2026-11-02): design pass** (Alex, impeccable critique 28/40 → fixes). Search results: Name takes the
+  spare width, Folder fixed at 200 px, symlink badge beside the name. Tab strip autohides with one tab in one pane.
+  Search off = one message on the search page with a Start Search Service button (`win.start-service`; banner and
+  red footer gone). Empty sidebar sections hide their headings (Relabel guard). Search Syntax is a grouped
+  AdwDialog whose examples insert into the search box. Command bar names Pin/Compress/Extract/View from 1380 sp;
+  disabled buttons faded to 0.3. Can't-open-folder names the folder and offers Go Back / Open Parent Folder.
+  Name clash leads with Keep Both. PDF/Office never fall through to the text dump (an all-ASCII PDF did).
+  Thumbnail hairline drawn on the picture (`thumbs::show`), not the Image's square slot. Terminal panel padding.
