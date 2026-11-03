@@ -10,7 +10,7 @@ Everything-style search for Linux: every file on every local disk, found as you 
 live by the kernel, and filtered to what you're allowed to see.
 
 ![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
-![Platform: Ubuntu 26.04](https://img.shields.io/badge/platform-Ubuntu%2026.04-E95420?logo=ubuntu&logoColor=white)
+![Linux: Ubuntu 26.04+, Debian 13, Fedora, openSUSE, Arch](https://img.shields.io/badge/Linux-Ubuntu%2026.04%2B%20%C2%B7%20Debian%2013%20%C2%B7%20Fedora%20%C2%B7%20openSUSE%20%C2%B7%20Arch-E95420?logo=linux&logoColor=white)
 ![GTK4 + libadwaita](https://img.shields.io/badge/GTK4-libadwaita-4A86CF?logo=gnome&logoColor=white)
 ![Written in Rust](https://img.shields.io/badge/written%20in-Rust-B7410E?logo=rust&logoColor=white)
 ![70 archive formats, all tested](https://img.shields.io/badge/archive%20formats-70%2C%20all%20tested-2EA44F)
@@ -62,7 +62,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - `ks`: the same search on the command line, like Everything's `es.exe`
 
 **File manager**
-- A command bar like Windows Explorer's, as icons (hover for the name and shortcut): New, Open, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Compress, Extract, Delete, View. The buttons grow or shrink with the window to stay on one row, and only a narrow window takes two. Select (☑) and Properties (ⓘ) sit at the start of the path bar
+- A command bar like Windows Explorer's, as icons (hover for the name and shortcut): New, Open, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Compress, Extract, Delete, View. Pin, Compress, Extract and View also show their names from the default window size up. The buttons grow or shrink with the window to stay on one row, and only a narrow window takes two. Select (☑) and Properties (ⓘ) sit at the start of the path bar
 - Select mode: a checkbox on every file, so you can tick exactly the ones you want (All / None / Invert too)
 - Tabs, dual pane (F3), details / grid / column views, session restore
 - Editable path bar (Ctrl+L), bookmarks shared with GNOME Files, Trash with restore
@@ -75,7 +75,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
 - Name clashes ask *Skip / Keep Both / Replace*; one failed item never stops a batch
 - Batch rename: find and replace (or regex), case changes, numbering, live preview
-- Colour tags, git status column and branch, symlink badges, free-space bars on drives
+- Colour tags you can name (right-click a dot in the sidebar: red becomes *Taxes*, and `tag:taxes` finds them), git status column and branch, symlink badges, free-space bars on drives
 - Command palette (Ctrl+Shift+P), terminal panel that follows the folder (Ctrl+\`)
 - Properties with checksums (MD5, SHA-1, SHA-256) and paste-to-verify; folder sizes instantly from the index (also in the Size column), or on request (Calculate) for network shares
 - Right-click scripts from `~/.local/share/nautilus/scripts`, run exactly as GNOME Files runs them
@@ -262,7 +262,7 @@ Shares without `x-kestrel` are never listed, so a big share behind a VPN isn't w
 | `under:~/Projects` · `parent:/etc` · `depth:<3` | by place |
 | `folder:` · `file:` · `empty:` | folders, files, empty folders |
 | `dupe:` · `sizedupe:` | same name / same size |
-| `tag:red` | colour tags |
+| `tag:red`, `tag:taxes` | colour tags, by colour or by the name you gave it |
 | `content:"TODO"` | text inside files (slower; read permission checked first) |
 | `regex:^\d{4}-` · `case:Readme` · `path:src/main` | regular expression, case-sensitive, full path |
 

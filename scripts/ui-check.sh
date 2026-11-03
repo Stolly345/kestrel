@@ -111,6 +111,8 @@ shot details "$D"
 shot command-bar-archive "$D" --select sample.zip
 SCREEN=1920x1080 shot command-bar-large "$D" --width 1920 --select sample.zip
 shot command-bar-compact "$D" --select sample.zip --action preview
+# the narrowest one-row bar that shows the names, with Extract (the widest set): must not scroll
+shot command-bar-names "$D" --width 1250 --select sample.zip
 shot command-bar-two-rows "$D" --width 600 --select sample.zip
 shot tabs-preview "$D" "$D/Projects" --action preview
 shot select-mode "$D" --action select-mode --select notes.md --select report.pdf
@@ -140,6 +142,7 @@ shot search-type --search pdf
 shot search-grid --search pic: --mode grid
 shot search-content --search content:weather
 shot search-none --search zzqqxx
+shot search-narrow "$D" --width 600 --search IMG
 KESTREL_SOCK=$R/nobody.sock shot search-service-down --search IMG
 if OK_ERR="folder error" shot no-permission "$D/locked"; then
     expect no-permission "says why in plain words" grep -q "Can't open this folder: You don't have permission" "$out/no-permission.log"

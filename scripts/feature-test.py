@@ -474,9 +474,9 @@ def _():
 @test("tabs: Ctrl+T opens, Ctrl+W closes")
 def _():
     start(D)
-    n = len(all_("page tab"))
-    key("Control_L", "t"); eventually(lambda: len(all_("page tab")) == n + 1, "a second tab")
-    key("Control_L", "w"); eventually(lambda: len(all_("page tab")) == n, "back to one tab")
+    # the tab strip hides while there's only one tab (0.9.38), so one tab reads as none
+    key("Control_L", "t"); eventually(lambda: len(all_("page tab")) == 2, "a second tab")
+    key("Control_L", "w"); eventually(lambda: len(all_("page tab")) <= 1, "back to one tab")
 
 
 @test("windows: Ctrl+N opens a second window")
@@ -909,8 +909,27 @@ def _():
 @test("search: tag search from the sidebar dots")
 def _():
     index(); start(D)
-    press_button("Files tagged red")
+    press_button("Files tagged Red")
     eventually(lambda: names() == ["IMG_0002.txt"], "the red-tagged file")
+
+
+@test("tags: right-click a sidebar dot names it; tag:<name> searches by the name")
+def _():
+    index(); start(D)
+    # the sidebar's reported extents are ~20 px off and the dot is small and round: find it by colour
+    wait(lambda: all_("button", "Files tagged Red"), "the red dot")
+    img = dpy.screen().root.get_image(0, 0, 260, 160, X.ZPixmap, 0xffffffff).data  # BGRX
+    red = [(i // 4 % 260, i // 4 // 260) for i in range(0, len(img), 4) if img[i + 2] > 180 and img[i + 1] < 70 and img[i] < 70]
+    assert red, "no red dot on screen"
+    x, y = sum(p[0] for p in red) // len(red), sum(p[1] for p in red) // len(red)
+    xtest.fake_input(dpy, X.MotionNotify, x=x, y=y)
+    xtest.fake_input(dpy, X.ButtonPress, 3); xtest.fake_input(dpy, X.ButtonRelease, 3); dpy.sync(); time.sleep(0.6)
+    wait(lambda: all_(None, "Name the red tag"), "the name box")
+    typ("Taxes"); key("Return")  # the box has the focus; Enter saves
+    eventually(lambda: '"red": "Taxes"' in open(os.path.join(CONF, "settings.json")).read(), "the name saved")
+    wait(lambda: all_("button", "Files tagged Taxes (red)"), "the dot renamed")
+    e = one("entry", "Search files"); click(e); typ("tag:taxes")
+    eventually(lambda: names() == ["IMG_0002.txt"], "the red-tagged file, found by name")
 
 
 @test("search: content search finds text inside files")
@@ -940,7 +959,7 @@ def _():
 def _():
     start(D)
     palette("search syntax")
-    one(None, contains="wildcard")
+    one(None, contains="Wildcards")
 
 
 @test("search: the query language through ks")
@@ -1101,11 +1120,10 @@ def _():
 @test("palette: Ctrl+Shift+P runs a command by name")
 def _():
     start(D)
-    n = len(all_("page tab"))
     key("Control_L", "Shift_L", "p")
     e = wait(lambda: [x for x in all_("text") + all_("entry") if (x.get_name() or "") != "Search files"][0], "the palette field")
     set_text(e, "new tab"); key("Return")
-    eventually(lambda: len(all_("page tab")) == n + 1, "a new tab")
+    eventually(lambda: len(all_("page tab")) == 2, "a new tab")  # one tab shows no strip
 
 
 @test("preferences: Show hidden files is saved and applied")

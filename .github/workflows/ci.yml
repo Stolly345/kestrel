@@ -1,0 +1,89 @@
+# Every push and pull request: build, unit tests, clippy, the UI check (the real app's main
+# screens under Xvfb) and the feature test (every feature clicked through via AT-SPI). Runs in an Ubuntu 26.04 container because
+# Kestrel needs its GTK/libadwaita; the runner's own Ubuntu is older.
+#
+# Everything after the system packages runs as an ordinary user: root ignores folder
+# permissions, so the "can't open this folder" check and the sandbox tests mean nothing as root.
+#
+# Release gate: the announce workflow only posts once this job has passed on the release commit.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+      # bubblewrap (the archive and preview sandbox) needs user namespaces
+      options: --privileged
+    env:
+      CARGO_TERM_COLOR: always
+      DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        # steps run as "tester" (made below) with its own cargo; bash -e keeps errors fatal
+        shell: runuser -u tester -- bash -e {0}
+    steps:
+      - name: System packages and a test user
+        shell: bash -e {0}
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
+            libgstreamer1.0-dev zlib1g-dev git curl ca-certificates xz-utils \
+            xvfb xauth dbus-daemon at-spi2-core bubblewrap poppler-utils zip zstd \
+            adwaita-icon-theme fonts-cantarell gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gvfs gvfs-backends \
+            python3-xlib python3-gi gir1.2-atspi-2.0 gstreamer1.0-tools desktop-file-utils shared-mime-info \
+            xterm  # the .deb install test borrows a real app launcher
+          useradd -m tester
+
+      - uses: actions/checkout@v4
+
+      - name: Hand the checkout to the test user
+        shell: bash -e {0}
+        run: chown -R tester "$GITHUB_WORKSPACE"
+
+      - name: Rust
+        run: curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy
+
+      - name: 7-Zip (the version in packaging/7zip/VERSION, digest-checked)
+        run: |
+          read v sum < packaging/7zip/VERSION
+          name=7z$(echo "$v" | tr -d .)-linux-x64.tar.xz
+          curl -fsSL -o "/tmp/$name" "https://github.com/ip7z/7zip/releases/download/$v/$name"
+          echo "$sum  /tmp/$name" | sha256sum -c -
+          tar -xJf "/tmp/$name" -C /tmp 7zzs
+          install -m 755 /tmp/7zzs packaging/7zip/7zz
+
+      - name: Unit tests
+        run: KESTREL_7ZZ=$PWD/packaging/7zip/7zz ~tester/.cargo/bin/cargo test --workspace
+
+      - name: Clippy
+        run: ~tester/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: UI check
+        run: PATH=~tester/.cargo/bin:$PATH scripts/ui-check.sh
+
+      - name: Feature test
+        # clicks through every feature (AT-SPI + XTest) under Xvfb, on demo files
+        run: PATH=~tester/.cargo/bin:$PATH scripts/feature-test.py
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-check
+          path: |
+            target/ui-check/
+            target/feature-test/
+          if-no-files-found: ignore

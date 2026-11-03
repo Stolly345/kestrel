@@ -18,7 +18,7 @@ pub fn file_type(f: &gio::File, info: Option<&gio::FileInfo>) -> glib::GString {
 pub fn open_default(ops: &Rc<Ops>, f: &gio::File) {
     let ct = file_type(f, None);
     match gio::AppInfo::default_for_type(&ct, false) {
-        Some(app) => launch(ops, &app, &[f.clone()]),
+        Some(app) => launch(ops, &app, std::slice::from_ref(f)),
         None => show(ops, vec![f.clone()], None, false),
     }
 }

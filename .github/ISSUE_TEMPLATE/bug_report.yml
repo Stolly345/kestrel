@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in Kestrel doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Kestrel did instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kestrel version
+      description: Menu › About Kestrel, or `dpkg -s kestrel | grep Version` / `rpm -q kestrel`
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: Ubuntu 26.04, GNOME 50, Wayland
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Search, File manager, Preview, Archives (extract / compress), Network shares, Install / packaging, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "If search is involved: `journalctl -u kestrel-indexd -n 50`. If the app crashed: run `kestrel` from a terminal and paste what it printed."
+      render: text

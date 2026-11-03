@@ -58,6 +58,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// Unix time of the last update check.
     pub last_update_check: u64,
+    /// Names the user gave colour tags ("red" -> "Taxes"); unnamed tags go by their colour.
+    pub tag_names: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -75,6 +77,7 @@ impl Default for Settings {
             preview_at_start: "remember".into(),
             check_updates: true,
             last_update_check: 0,
+            tag_names: Default::default(),
         }
     }
 }

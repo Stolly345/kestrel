@@ -671,3 +671,14 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   disabled buttons faded to 0.3. Can't-open-folder names the folder and offers Go Back / Open Parent Folder.
   Name clash leads with Keep Both. PDF/Office never fall through to the text dump (an all-ASCII PDF did).
   Thumbnail hairline drawn on the picture (`thumbs::show`), not the Image's square slot. Terminal panel padding.
+- **Unreleased (2026-11-02): UX evaluation fixes.** CI (`.github/workflows/ci.yml`): unit tests, clippy -D warnings
+  and ui-check under Xvfb in an ubuntu:26.04 container on every push; the announce workflow waits for its "test"
+  check on the release commit and won't post on red. Search info row: "Searching every disk" (no breadcrumbs) or
+  "Searching in this folder and the folders inside it: ⌂ › Demo". Below 760 sp the header's scope picker moves into
+  that row as a Change ▾ menu (`win.search-here-only` added), the search placeholder shortens to "Search files…",
+  and the Type column steps aside (`Browser::set_narrow`; its saved visibility is kept). Command bar names for
+  Pin/Compress/Extract/View now from 1010 sp at normal size (the default 1280 px window), large icons from 1380.
+  Tags can be named: right-click (or long-press) a sidebar dot, saved in settings `tag_names`; dots say
+  "Taxes (red)"; `tag:taxes` is rewritten to `tag:red` before the query goes to the index (`tags::resolve_query`).
+  `label_icon_buttons` names a button by its tooltip's first line, further lines become the description.
+  Bug-report issue template; each release's Reddit reminder closes the previous one. README badge lists every distro.

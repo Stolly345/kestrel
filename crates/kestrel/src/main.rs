@@ -173,7 +173,12 @@ pub fn label_icon_buttons(root: &gtk::Widget) {
             && !has_text
             && let Some(t) = w.tooltip_text()
         {
-            w.update_property(&[gtk::accessible::Property::Label(&t)]);
+            // first line names it; a further line is a hint ("Right-click to name this tag")
+            let (name, hint) = t.split_once('\n').unwrap_or((&t, ""));
+            w.update_property(&[gtk::accessible::Property::Label(name)]);
+            if !hint.is_empty() {
+                w.update_property(&[gtk::accessible::Property::Description(hint)]);
+            }
         }
         let mut c = w.first_child();
         while let Some(ch) = c {

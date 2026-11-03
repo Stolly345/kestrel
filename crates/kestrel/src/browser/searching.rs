@@ -64,7 +64,7 @@ impl Browser {
 
     /// The query the daemon sees: the user's text plus the scope term.
     pub(super) fn effective_query(&self) -> Option<String> {
-        let q = self.query()?;
+        let q = crate::tags::resolve_query(&self.query()?);
         Some(match self.scope.get().term(&self.dir.borrow()) {
             Some(t) => format!("{q} {t}"),
             None => q,

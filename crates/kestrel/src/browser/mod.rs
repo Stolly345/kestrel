@@ -196,6 +196,10 @@ pub struct Browser {
     loc_stack: gtk::Stack,
     crumbs: gtk::Box,
     loc_label: gtk::Label,
+    /// Where to search, beside loc_label: shown while searching, when the window is too narrow
+    /// for the header's scope picker (the window binds `scope_slot`'s visibility to that).
+    pub scope_slot: gtk::Box,
+    scope_btn: gtk::MenuButton,
     loc_entry: gtk::Entry,
     dirlist: gtk::DirectoryList,
     filter: gtk::CustomFilter,
@@ -212,6 +216,8 @@ pub struct Browser {
     opt_cols: Vec<(&'static str, gtk::ColumnViewColumn)>,
     /// set while applying settings, so the column-change handlers don't save them right back
     applying_cols: Cell<bool>,
+    /// Window too narrow for every column: Type steps aside (its saved setting is kept).
+    narrow: Cell<bool>,
     col_save_pending: Cell<bool>,
     git: RefCell<Option<Rc<crate::git::GitInfo>>>,
     git_pending: Cell<bool>,
@@ -510,6 +516,20 @@ impl Browser {
         );
         crumb_row.append(&loc_label);
         crumb_row.append(&crumb_scroll);
+        let scope_menu = gio::Menu::new();
+        scope_menu.append(Some("Every disk"), Some("win.search-everywhere"));
+        scope_menu.append(Some("This folder and the folders inside it"), Some("win.search-here"));
+        scope_menu.append(Some("Only this folder"), Some("win.search-here-only"));
+        let scope_btn = gtk::MenuButton::builder()
+            .label("Change")
+            .menu_model(&scope_menu)
+            .tooltip_text("Where to search")
+            .css_classes(["flat", "crumb"])
+            .visible(false)
+            .build();
+        let scope_slot = gtk::Box::builder().visible(false).build();
+        scope_slot.append(&scope_btn);
+        crumb_row.append(&scope_slot);
         let loc_entry = gtk::Entry::builder()
             .placeholder_text("Type a path or address, e.g. ~/Projects or sftp://host/")
             .hexpand(true)
@@ -572,6 +592,8 @@ impl Browser {
             loc_stack,
             crumbs,
             loc_label,
+            scope_slot,
+            scope_btn,
             loc_entry,
             dirlist,
             filter,
@@ -585,6 +607,7 @@ impl Browser {
             git_col,
             opt_cols,
             applying_cols: Cell::new(false),
+            narrow: Cell::new(false),
             col_save_pending: Cell::new(false),
             git: RefCell::default(),
             git_pending: Cell::new(false),
@@ -777,12 +800,19 @@ impl Browser {
         self.applying_cols.set(true);
         for (i, p) in crate::prefs::get().columns().iter().enumerate() {
             if let Some((_, c)) = self.opt_cols.iter().find(|(id, _)| *id == p.id) {
-                c.set_visible(p.visible);
+                c.set_visible(p.visible && !(self.narrow.get() && p.id == "type"));
                 c.set_fixed_width(p.width);
                 self.list.insert_column(3 + i as u32, c); // moves it if already there
             }
         }
         self.applying_cols.set(false);
+    }
+
+    /// In a narrow window the Type column would only show as a word cut off at the edge.
+    pub fn set_narrow(&self, narrow: bool) {
+        if self.narrow.replace(narrow) != narrow {
+            self.apply_columns();
+        }
     }
 
     /// Drag a Size/Modified/Type header onto another to move it there. GTK 4.22's own reordering
@@ -866,9 +896,15 @@ impl Browser {
                 .filter_map(|i| cols.item(i).and_downcast::<gtk::ColumnViewColumn>())
                 .filter_map(|c| {
                     let (id, _) = b.opt_cols.iter().find(|(_, x)| *x == c)?;
+                    // hidden only for being narrow: keep what the user chose
+                    let visible = if b.narrow.get() && *id == "type" {
+                        crate::prefs::get().columns().iter().find(|p| p.id == *id).is_none_or(|p| p.visible)
+                    } else {
+                        c.is_visible()
+                    };
                     Some(crate::prefs::ColumnPref {
                         id: id.to_string(),
-                        visible: c.is_visible(),
+                        visible,
                         width: c.fixed_width(),
                     })
                 })
@@ -1336,18 +1372,25 @@ impl Browser {
     }
 
     fn update_locbar(&self) {
+        // the breadcrumbs say where a folder-scoped search looks; for a whole-disk search the
+        // folder you started in is beside the point, so the sentence stands on its own
+        let crumb_scroll = self.crumbs.parent().and_then(|v| v.parent());
+        self.scope_btn.set_visible(self.is_searching());
         if !self.is_searching() {
             self.loc_label.set_visible(false);
+            crumb_scroll.inspect(|s| s.set_visible(true));
             return;
         }
         self.loc_label.set_visible(true);
         let local = self.dir.borrow().path().is_some();
-        self.loc_label.set_label(match self.scope.get() {
-            Scope::Everywhere => "Searching everywhere, from",
-            _ if !local => "Searching everywhere (this location isn't indexed), from",
-            Scope::Folder => "Searching in",
-            Scope::FolderOnly => "Searching only in",
-        });
+        let (text, crumbs) = match self.scope.get() {
+            Scope::Everywhere => ("Searching every disk", false),
+            _ if !local => ("Searching every disk, because this location isn't indexed", false),
+            Scope::Folder => ("Searching in this folder and the folders inside it:", true),
+            Scope::FolderOnly => ("Searching only in this folder:", true),
+        };
+        self.loc_label.set_label(text);
+        crumb_scroll.inspect(|s| s.set_visible(crumbs));
     }
 
     pub fn is_network(&self) -> bool {

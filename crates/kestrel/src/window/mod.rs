@@ -81,13 +81,12 @@ pub fn new_menu() -> gio::Menu {
     m
 }
 
-/// Command-bar sizes by the bar's own width (sp), smallest first: (from this width, CSS size class).
-/// Below the first: two compact rows. One row measures 583 px compact, 783 normal, 1081 large; each
-/// step leaves room for Extract; anything that still doesn't fit scrolls.
-const BAR_SIZES: [(u32, &str); 3] = [(630, "compact"), (840, ""), (1140, "large")];
-/// Wider still (large row + about 240 px): Pin, Compress, Extract and View, the glyphs nobody can
-/// guess, get their names beside them.
-const BAR_LABELS_AT: u32 = 1380;
+/// Command-bar sizes by the bar's own width (sp), smallest first: (from this width, CSS size class,
+/// names shown). Below the first: two compact rows. One row measures 583 px compact, 783 normal,
+/// 1081 large; the names (Pin, Compress, Extract, View: the glyphs nobody can guess) add about
+/// 200 px, so they appear at the default 1280 px window (bar ~1040) before the icons grow. Each step
+/// leaves room for Extract; anything that still doesn't fit scrolls.
+const BAR_SIZES: [(u32, &str, bool); 4] = [(630, "compact", false), (840, "", false), (1010, "", true), (1380, "large", true)];
 
 pub struct Pane {
     pub root: gtk::Box,
@@ -290,6 +289,7 @@ impl Win {
         let history = gtk::Popover::builder().autohide(false).has_arrow(false).halign(gtk::Align::Start).build();
         history.set_parent(&entry);
         let scope_w = scope.clone();
+        let entry_w = entry.clone();
 
         // filter chips: each edits its own tokens in the query text, so chips and syntax never disagree
         let chip_box = gtk::Box::builder().spacing(6).css_classes(["chip-bar"]).build();
@@ -570,14 +570,14 @@ impl Win {
         let cmd_bar = adw::BreakpointBin::builder().width_request(1).height_request(1).child(&cmd_scroll).build();
         // narrowest: two compact rows; wider, one row that grows (the last matching breakpoint wins)
         cmd.add_css_class("compact");
-        for (width, size) in BAR_SIZES.into_iter().chain([(BAR_LABELS_AT, "large")]) {
+        for (width, size, with_names) in BAR_SIZES {
             let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("min-width: {width}sp")).unwrap());
             let classes: Vec<&str> = ["command-bar", size].into_iter().filter(|c| !c.is_empty()).collect();
             bp.add_setter(&cmd, "css-classes", Some(&classes.to_value()));
             bp.add_setter(&cmd, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
             bp.add_setter(&row_sep, "visible", Some(&true.to_value()));
-            // only one breakpoint applies at a time, so the widest repeats the large setters above
-            if width == BAR_LABELS_AT {
+            // only one breakpoint applies at a time, so each one that shows names sets them again
+            if with_names {
                 for l in names.borrow().iter() {
                     bp.add_setter(l, "visible", Some(&true.to_value()));
                 }
@@ -613,13 +613,14 @@ impl Win {
         toasts.set_child(Some(&split));
         window.set_content(Some(&toasts));
 
-        // narrow windows: sidebar becomes an overlay, then the scope picker hides (Ctrl+F still scopes)
+        // narrow windows: sidebar becomes an overlay, then the scope picker moves into the search info row
         let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1000sp").unwrap());
         bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         window.add_breakpoint(bp);
         let bp = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
         bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         bp.add_setter(&scope_w, "visible", Some(&false.to_value()));
+        bp.add_setter(&entry_w, "placeholder-text", Some(&"Search files…".to_value()));
         window.add_breakpoint(bp);
 
         Win {
@@ -677,6 +678,11 @@ impl Win {
         let s = crate::prefs::get();
         b.set_mode(s.view());
         b.set_scope(s.scope());
+        // narrow window: the header's scope picker hides, so the search info row offers it
+        self.bar.scope.bind_property("visible", &b.scope_slot, "visible").invert_boolean().sync_create().build();
+        b.set_narrow(!self.bar.scope.get_visible());
+        let w = Rc::downgrade(&b);
+        self.bar.scope.connect_visible_notify(move |s| w.upgrade().into_iter().for_each(|b| b.set_narrow(!s.get_visible())));
         BROWSERS.with_borrow_mut(|v| v.push(b.clone()));
         let page = self.panes[pane].view.append(&b.root);
         crate::label_icon_buttons(b.root.upcast_ref());
@@ -1178,7 +1184,7 @@ pub const SYNTAX: &[(&str, &[(&str, &str)])] = &[
             ("folder:", "Only folders"),
             ("ext:pdf;docx", "These extensions"),
             ("pic:", "Pictures. Also audio: video: doc: zip: exe: code: font:"),
-            ("tag:red", "Tagged red"),
+            ("tag:red", "Tagged red, or tag:taxes once red is named Taxes (right-click a sidebar dot)"),
         ],
     ),
     (

@@ -36,6 +36,13 @@ impl Win {
             w.focus_search(None);
             w.show_suggestions();
         });
+        self.act("search-here-only", |w| {
+            if let Some(b) = w.current() {
+                b.set_scope(Scope::FolderOnly);
+                w.update();
+            }
+            w.focus_search(None);
+        });
         self.act("search-everywhere", |w| {
             if let Some(b) = w.current() {
                 b.set_scope(Scope::Everywhere);

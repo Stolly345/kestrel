@@ -272,13 +272,30 @@ impl Sidebar {
         // one row of colour dots: click one to list every file with that tag (an index search)
         let tags = gtk::Box::builder().spacing(0).margin_start(8).margin_end(8).margin_bottom(4).build();
         for t in kestrel_index::TAGS {
-            let b = crate::tags::dot_button(t);
-            let what = format!("Files tagged {t}");
-            b.set_tooltip_text(Some(&what));
-            b.update_property(&[gtk::accessible::Property::Label(&what)]);
+            let b = crate::tags::dot_button(t, crate::tags::SIDEBAR);
             let nav = navigate.clone();
             let q = format!("tag:{t}");
             b.connect_clicked(move |_| nav(Loc::Search(q.clone())));
+            // right-click (or long press): give the colour a name, so red can mean "Taxes"
+            let rename = gtk::GestureClick::builder().button(3).build();
+            let bb = b.clone();
+            rename.connect_pressed(move |_, _, _, _| tag_name_popover(&bb, t));
+            b.add_controller(rename);
+            let press = gtk::GestureLongPress::new();
+            let bb = b.clone();
+            press.connect_pressed(move |_, _, _| tag_name_popover(&bb, t));
+            b.add_controller(press);
+            // and from the keyboard, like any context menu
+            let keys = gtk::ShortcutController::new();
+            let bb = b.clone();
+            keys.add_shortcut(gtk::Shortcut::new(
+                gtk::ShortcutTrigger::parse_string("<Shift>F10|Menu"),
+                Some(gtk::CallbackAction::new(move |_, _| {
+                    tag_name_popover(&bb, t);
+                    glib::Propagation::Stop
+                })),
+            ));
+            b.add_controller(keys);
             tags.append(&b);
         }
 
@@ -439,4 +456,44 @@ impl Sidebar {
             self.devices.append(&r);
         }
     }
+}
+
+/// "Name this tag": a small popover under a sidebar tag dot. Empty goes back to the colour's name.
+fn tag_name_popover(dot: &gtk::Button, t: &'static str) {
+    let entry = gtk::Entry::builder()
+        .text(crate::tags::custom_name(t).unwrap_or_default())
+        .placeholder_text("e.g. Taxes, Work, Keep")
+        .activates_default(true)
+        .build();
+    entry.update_property(&[gtk::accessible::Property::Label(&format!("Name for the {t} tag"))]);
+    let save = gtk::Button::builder().label("Save").css_classes(["suggested-action"]).build();
+    let row = gtk::Box::builder().spacing(6).build();
+    row.append(&entry);
+    row.append(&save);
+    let col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+    col.append(&gtk::Label::builder().label(format!("Name the {t} tag")).css_classes(["heading"]).xalign(0.0).build());
+    col.append(&row);
+    col.append(
+        &gtk::Label::builder()
+            .label(format!("Search it with tag:{t} or by its name. Leave empty to call it {t} again."))
+            .css_classes(["dim-label", "caption"])
+            .wrap(true)
+            .max_width_chars(34)
+            .xalign(0.0)
+            .build(),
+    );
+    let pop = gtk::Popover::builder().child(&col).build();
+    pop.set_parent(dot);
+    pop.set_default_widget(Some(&save));
+    let (p, e) = (pop.clone(), entry.clone());
+    save.connect_clicked(move |_| {
+        crate::tags::rename(t, &e.text());
+        p.popdown();
+    });
+    pop.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    pop.popup();
+    entry.grab_focus();
 }

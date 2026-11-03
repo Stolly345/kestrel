@@ -12,7 +12,8 @@
 # Reddit has no posting token (its API needs Reddit's approval), so instead the
 # second step opens an issue with one pre-filled "submit" link per subreddit:
 # click, check, Post. Subreddits from the repo variable REDDIT_SUBREDDITS
-# (space-separated), else the list below. Close the issue when done.
+# (space-separated), else the list below. Close the issue when done; the next release
+# closes any that are still open.
 
 name: Announce release
 
@@ -32,12 +33,35 @@ on:
 permissions:
   contents: read
   issues: write
+  checks: read
 
 jobs:
   announce:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     steps:
+      - name: Wait for CI to pass on the release commit
+        # a release is only announced once ci.yml's "test" job is green for its commit
+        if: github.event_name == 'release' || !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          [ -n "$TAG" ] || TAG=$(gh api "repos/$REPO/releases/latest" --jq .tag_name)
+          sha=$(gh api "repos/$REPO/commits/$TAG" --jq .sha)
+          for _ in $(seq 60); do
+            res=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=test" \
+                  --jq '[.check_runs[] | .conclusion // "pending"] | first // "missing"')
+            echo "CI on $TAG ($sha): $res"
+            case $res in
+              success) exit 0 ;;
+              pending|missing) sleep 60 ;;
+              *) echo "::error::CI is $res on $TAG; not announcing"; exit 1 ;;
+            esac
+          done
+          echo "::error::CI didn't finish on $TAG within an hour"; exit 1
+
       - name: Post to Mastodon
         id: mastodon
         env:
@@ -266,4 +290,14 @@ jobs:
                                 "--body", body, "--assignee", owner],
                                capture_output=True, text=True, check=True).stdout
           print("Opened", out.strip())
+          # older releases' reminders are stale now: close them so only one chore issue is ever open
+          prefix = f"Share {r['app']} "
+          old = subprocess.run(["gh", "issue", "list", "-R", os.environ["REPO"], "--state", "open",
+                                "--search", f'"{prefix}" "on Reddit" in:title', "--json", "number,title"],
+                               capture_output=True, text=True, check=True).stdout
+          for i in json.loads(old):
+              if i["title"] != name and i["title"].startswith(prefix) and i["title"].endswith(" on Reddit"):
+                  subprocess.run(["gh", "issue", "close", str(i["number"]), "-R", os.environ["REPO"],
+                                  "--reason", "not planned", "--comment", f"Superseded by {r['version']}."], check=True)
+                  print("Closed stale", i["title"])
           EOF

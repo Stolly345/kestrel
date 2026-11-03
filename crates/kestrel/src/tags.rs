@@ -57,8 +57,74 @@ fn title(t: &str) -> String {
     format!("{}{}", t[..1].to_uppercase(), &t[1..])
 }
 
-/// A round colour button for tag `t` (the dot is a child, so the theme's hover ring shows around it).
-pub fn dot_button(t: &str) -> gtk::Button {
+/// The name the user gave colour `t`, if any.
+pub fn custom_name(t: &str) -> Option<String> {
+    crate::prefs::get().tag_names.get(t).map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+}
+
+/// What to call tag `t`: "Taxes (red)" once named, else "Red".
+pub fn label(t: &str) -> String {
+    custom_name(t).map_or_else(|| title(t), |n| format!("{n} ({t})"))
+}
+
+/// Name tag `t` ("" goes back to the colour), and relabel every dot on screen.
+pub fn rename(t: &str, name: &str) {
+    crate::prefs::update(|s| {
+        if name.trim().is_empty() {
+            s.tag_names.remove(t);
+        } else {
+            s.tag_names.insert(t.to_string(), name.trim().to_string());
+        }
+    });
+    DOTS.with_borrow_mut(|v| {
+        v.retain(|(w, ..)| w.upgrade().is_some());
+        v.iter().for_each(|(w, t, prefix)| w.upgrade().into_iter().for_each(|b| name_dot(&b, t, prefix)));
+    });
+}
+
+/// `tag:taxes` in a query means the colour named Taxes (the index only knows colours).
+pub fn resolve_query(q: &str) -> String {
+    resolve_with(q, &crate::prefs::get().tag_names)
+}
+
+fn resolve_with(q: &str, names: &std::collections::BTreeMap<String, String>) -> String {
+    if names.is_empty() {
+        return q.to_string();
+    }
+    q.split(' ')
+        .map(|w| {
+            let (not, rest) = w.strip_prefix('!').map_or(("", w), |r| ("!", r));
+            let Some(v) = rest.get(..4).filter(|p| p.eq_ignore_ascii_case("tag:")).map(|_| &rest[4..]) else {
+                return w.to_string();
+            };
+            match names.iter().find(|(_, n)| n.trim().eq_ignore_ascii_case(v)) {
+                Some((colour, _)) => format!("{not}tag:{colour}"),
+                None => w.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Tooltip prefix of the sidebar's tag dots.
+pub const SIDEBAR: &str = "Files tagged ";
+
+thread_local! {
+    /// Every dot button with its tooltip prefix, so a rename reaches them all.
+    static DOTS: std::cell::RefCell<Vec<(gtk::glib::WeakRef<gtk::Button>, &'static str, &'static str)>> = Default::default();
+}
+
+fn name_dot(b: &gtk::Button, t: &str, prefix: &str) {
+    let what = format!("{prefix}{}", label(t));
+    // the sidebar's dots are where a tag gets its name: say so until it has one
+    let hint = if prefix == SIDEBAR && custom_name(t).is_none() { "\nRight-click to name this tag" } else { "" };
+    b.set_tooltip_text(Some(&format!("{what}{hint}")));
+    b.update_property(&[gtk::accessible::Property::Label(&what)]);
+}
+
+/// A round colour button for tag `t` (the dot is a child, so the theme's hover ring shows around it),
+/// named "`prefix`Taxes (red)" for its tooltip and screen readers.
+pub fn dot_button(t: &'static str, prefix: &'static str) -> gtk::Button {
     let dot = gtk::Box::builder()
         .css_classes(["tag-dot", "tag-big", &format!("tag-{t}")])
         .halign(gtk::Align::Center)
@@ -67,10 +133,10 @@ pub fn dot_button(t: &str) -> gtk::Button {
     let b = gtk::Button::builder()
         .child(&dot)
         .css_classes(["flat", "circular", "tag-pick"])
-        .tooltip_text(title(t))
         .focus_on_click(false)
         .build();
-    b.update_property(&[gtk::accessible::Property::Label(&title(t))]);
+    name_dot(&b, t, prefix);
+    DOTS.with_borrow_mut(|v| v.push((b.downgrade(), t, prefix)));
     b
 }
 
@@ -99,10 +165,7 @@ pub fn toggle(files: &[gio::File], t: &str) -> std::io::Result<()> {
 pub fn picker(pick: impl Fn(&str) + Clone + 'static) -> gtk::Box {
     let row = gtk::Box::builder().spacing(2).halign(gtk::Align::Center).css_classes(["tag-picker"]).build();
     for t in TAGS {
-        let b = dot_button(t);
-        let what = format!("Tag {}", title(t));
-        b.set_tooltip_text(Some(&what));
-        b.update_property(&[gtk::accessible::Property::Label(&what)]);
+        let b = dot_button(t, "Tag ");
         let p = pick.clone();
         b.connect_clicked(move |_| p(t));
         row.append(&b);
@@ -138,5 +201,18 @@ pub fn set_picker(row: &gtk::Box, bits: u8) {
         } else {
             gtk::AccessibleTristate::False
         })]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tag_names_become_colours_in_queries() {
+        let names = [("red".to_string(), "Taxes".to_string())].into_iter().collect();
+        let r = |q| super::resolve_with(q, &names);
+        assert_eq!(r("invoice tag:taxes"), "invoice tag:red");
+        assert_eq!(r("!TAG:Taxes 2026"), "!tag:red 2026");
+        assert_eq!(r("tag:red tag:work"), "tag:red tag:work", "colours and unknown names pass through");
+        assert_eq!(r("taxes"), "taxes", "plain words are left alone");
     }
 }
