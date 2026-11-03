@@ -209,7 +209,7 @@ fn main() -> glib::ExitCode {
     let app = if fm1 {
         // a service: stays up without windows, exits a minute after the last one closes
         let app = adw::Application::builder()
-            .application_id("dev.kestrel.Kestrel.FileManager1")
+            .application_id("dev.kestrel.Kestrel")
             .flags(gio::ApplicationFlags::IS_SERVICE)
             .build();
         app.set_inactivity_timeout(60_000);

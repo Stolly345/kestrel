@@ -682,3 +682,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   "Taxes (red)"; `tag:taxes` is rewritten to `tag:red` before the query goes to the index (`tags::resolve_query`).
   `label_icon_buttons` names a button by its tooltip's first line, further lines become the description.
   Bug-report issue template; each release's Reddit reminder closes the previous one. README badge lists every distro.
+- **Unreleased (2026-11-03): one dock icon for "Show in Folder" windows.** The FileManager1 service
+  (`kestrel --filemanager1`) used the application ID `dev.kestrel.Kestrel.FileManager1`. On Wayland that becomes the
+  window's app_id, and GNOME Shell found no matching .desktop file, so folders opened from a browser's downloads
+  got their own dock icon. The service now uses `dev.kestrel.Kestrel` too. No clash: the normal launch is
+  NON_UNIQUE and never takes that bus name, and `org.freedesktop.FileManager1` already keeps the service to one
+  copy. Tested over D-Bus (ShowFolders ~/Downloads) and by Alex from the browser on the installed .deb.
