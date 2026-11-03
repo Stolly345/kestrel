@@ -36,6 +36,9 @@ jobs:
       - name: System packages and a test user
         shell: bash -e {0}
         run: |
+          # the runner's AppArmor blocks bwrap's user namespaces ("Failed RTM_NEWADDR");
+          # the container is privileged, so lift it for this throwaway VM
+          sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential pkg-config libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
