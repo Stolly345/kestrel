@@ -115,3 +115,14 @@ Ideas from [Heimdall](https://github.com/Kryzern/Heimdall), a Windows launcher w
   `GDK_BACKEND=broadway kestrel --quick --type TEXT --screenshot OUT.png`.
 - Benchmark: `cargo run --release --example rank -- / -- a re report readme` (name sort vs Best Match vs narrowed).
 - Not ported: window switcher (`>`, needs a GNOME Shell extension on Wayland), the glass shader, tray icon, self-updating.
+
+## Look: Hallmark restyle, theme Vantage (2026-11-03)
+- All styling lives in `crates/kestrel/src/style.css` (light tokens, libadwaita variables mapped to them, rules)
+  and `style-dark.css` (dark tokens). `main::install_styles` loads both, adding the dark one only while
+  `AdwStyleManager` is dark: a per-stylesheet `prefers-color-scheme` needs GTK 4.20, older than Debian 13/Fedora 41 have.
+- Vantage: blue-black ground and steel ink in dark, a derived cool-white light mode; one lime signal for selection,
+  focus, the primary action, switches and drive usage. Geologica (OFL) ships in the packages at
+  `/usr/share/fonts/{truetype/,}kestrel/`; without it the app falls back to Adwaita Sans.
+- GTK CSS gotcha: `:not()` takes one simple selector; a compound one drops the whole rule with a parser warning.
+- Before/after screenshots: `.hallmark/compare.html` (not committed). Dev runs see the font with
+  `FONTCONFIG_FILE` pointing at a conf that adds `packaging/fonts`.

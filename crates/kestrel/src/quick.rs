@@ -16,17 +16,6 @@ pub const APP_ID: &str = "dev.kestrel.Kestrel.Quick";
 const FILES: usize = 40;
 const SHOWN: i32 = 8;
 
-const CSS: &str = "
-window.quick { background: transparent; }
-.quick-card { background: var(--window-bg-color); border-radius: 16px; border: 1px solid alpha(currentColor, 0.12); }
-.quick-entry { min-height: 48px; font-size: 1.25em; background: none; border: none; box-shadow: none; outline: none; }
-.quick-list { background: none; }
-.quick-list row { border-radius: 10px; margin: 0 6px; padding: 5px 8px; }
-.quick-list row:selected { background: alpha(@accent_bg_color, 0.25); color: inherit; }
-.quick-heading { font-size: 0.8em; font-weight: bold; opacity: 0.55; margin: 6px 16px 2px 16px; }
-.quick-hint { font-size: 0.8em; opacity: 0.5; padding: 5px 14px; border-top: 1px solid alpha(currentColor, 0.08); }
-.quick-confirm { color: @warning_color; }
-";
 
 struct Quick {
     win: adw::ApplicationWindow,
@@ -59,9 +48,7 @@ pub fn main() -> glib::ExitCode {
     app.connect_startup(|app| {
         gtk::Window::set_default_icon_name("dev.kestrel.Kestrel");
         crate::prefs::apply_color_scheme(&crate::prefs::get());
-        let css = gtk::CssProvider::new();
-        css.load_from_string(CSS);
-        gtk::style_context_add_provider_for_display(&gdk::Display::default().unwrap(), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        crate::install_styles();
         // stay running between uses: the next press of the shortcut shows the window at once
         std::mem::forget(app.hold());
     });
@@ -121,11 +108,16 @@ fn build(app: &adw::Application) -> Rc<Quick> {
         .max_content_height(SHOWN * 52)
         .child(&list)
         .build();
-    let hint = gtk::Label::builder()
-        .xalign(0.0)
-        .css_classes(["quick-hint"])
-        .label("Enter open · Ctrl+Enter show in folder · Ctrl+C copy path · Esc close")
-        .build();
+    // the keys, each beside what it does, spaced apart rather than joined
+    let hint = gtk::Box::builder().spacing(18).css_classes(["quick-hint"]).build();
+    for (key, what) in [("Enter", "open"), ("Ctrl+Enter", "show in folder"), ("Ctrl+C", "copy path"), ("Esc", "close")] {
+        let pair = gtk::Box::builder().spacing(6).build();
+        pair.append(&gtk::Label::builder().label(key).css_classes(["quick-key"]).build());
+        pair.append(&gtk::Label::new(Some(what)));
+        hint.append(&pair);
+    }
+    let note = gtk::Label::builder().xalign(0.0).hexpand(true).css_classes(["quick-note"]).build();
+    hint.append(&note);
     let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["quick-card"]).build();
     card.append(&entry);
     card.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -145,7 +137,7 @@ fn build(app: &adw::Application) -> Rc<Quick> {
         entry,
         list,
         scroll,
-        hint,
+        hint: note,
         rows: RefCell::default(),
         apps: RefCell::new(launcher::all_apps()),
         pages: launcher::settings_pages(),
@@ -394,14 +386,16 @@ fn local_rows(q: &Quick, t: &str) -> Vec<Row> {
 }
 
 /// A row for a remembered path (pinned or recent), or an app remembered as `app:ID`.
-fn path_row(q: &Quick, p: &str, why: &str) -> Option<Row> {
+fn path_row(q: &Quick, p: &str, why: &'static str) -> Option<Row> {
     if let Some(id) = p.strip_prefix("app:") {
         let a = q.apps.borrow().iter().find(|a| a.info.id().is_some_and(|x| x == id)).cloned()?;
         return Some(Row {
             title: a.name,
-            subtitle: format!("{why} · Application"),
+            subtitle: a.desc,
             icon: a.icon,
             act: Act::App(a.info),
+            kind: "App",
+            section: why,
         });
     }
     let path = std::path::Path::new(p);
@@ -409,7 +403,7 @@ fn path_row(q: &Quick, p: &str, why: &str) -> Option<Row> {
     Some(file_row(p, meta.is_dir(), Some(why)))
 }
 
-fn file_row(p: &str, dir: bool, why: Option<&str>) -> Row {
+fn file_row(p: &str, dir: bool, why: Option<&'static str>) -> Row {
     let path = std::path::Path::new(p);
     let name = path.file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned());
     let folder = path
@@ -423,12 +417,11 @@ fn file_row(p: &str, dir: bool, why: Option<&str>) -> Row {
     };
     Row {
         title: name,
-        subtitle: match why {
-            Some(w) => format!("{w} · {folder}"),
-            None => folder,
-        },
+        subtitle: folder,
         icon,
         act: Act::Path(p.to_string()),
+        kind: "",
+        section: why.unwrap_or_default(),
     }
 }
 
@@ -482,6 +475,8 @@ fn note(title: &str, sub: &str) -> Row {
         subtitle: sub.into(),
         icon: gio::ThemedIcon::new("dialog-information-symbolic").upcast(),
         act: Act::Insert(String::new()),
+        kind: "",
+        section: "",
     }
 }
 
@@ -492,6 +487,10 @@ fn set_rows(q: &Rc<Quick>, rows: Vec<Row>) {
     let picks = crate::picks::load();
     for (i, r) in rows.iter().enumerate() {
         let row = row_widget(r);
+        // before you type: a heading over the first row of each section (Pinned, Recent)
+        if !r.section.is_empty() && (i == 0 || rows[i - 1].section != r.section) {
+            row.set_header(Some(&gtk::Label::builder().label(r.section).xalign(0.0).css_classes(["quick-heading"]).build()));
+        }
         if t.is_empty()
             && picks.is_pinned(match &r.act {
                 Act::Path(p) => p,
@@ -532,10 +531,14 @@ fn row_widget(r: &Row) -> gtk::ListBoxRow {
         .hexpand(true)
         .build();
     text.append(&title);
+    sub.set_visible(!r.subtitle.is_empty());
     text.append(&sub);
     let b = gtk::Box::builder().spacing(12).build();
     b.append(&icon);
     b.append(&text);
+    if !r.kind.is_empty() {
+        b.append(&gtk::Label::builder().label(r.kind).valign(gtk::Align::Center).css_classes(["quick-kind"]).build());
+    }
     let row = gtk::ListBoxRow::builder().child(&b).build();
     // drag a file straight into another app
     if let Act::Path(p) = &r.act {
@@ -638,10 +641,12 @@ fn activate(q: &Rc<Quick>, i: usize, in_folder: bool) {
                 if let Some(row) = q.list.row_at_index(i as i32)
                     && let Some(sub) = row
                         .child()
-                        .and_then(|b| b.last_child())
+                        .and_then(|b| b.first_child())
+                        .and_then(|icon| icon.next_sibling())
                         .and_then(|t| t.last_child())
                         .and_downcast::<gtk::Label>()
                 {
+                    sub.set_visible(true);
                     sub.set_label(&format!("Press Enter again to {}", a.name.to_lowercase()));
                     sub.add_css_class("quick-confirm");
                 }

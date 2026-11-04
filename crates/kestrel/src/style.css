@@ -1,0 +1,183 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Vantage (deal 2/3, seed desktop-file-manager-instant-e92d·6a3690e6·2026-11-04·r0) · redesign: restyle
+ * nav: kept (header bar, command bar, sidebar, tabs) · signature: the search box as the instrument, lime caret and ring, results counted in tabular figures · states: loading, empty, error, full (kept) · vantage: object/steel
+ * axes: dark/grotesk-sans/chromatic-lime · posture: restrained · contrast: pass · modes: light+dark · v2.0.0 */
+/* Hallmark · pre-emit critique: P3 H3 E4 S4 R3 V4 · weakest: H (hierarchy is libadwaita's), kept on purpose: the layout is the owner's at restyle depth */
+/* Hallmark · answered: 7 (reduced motion) GTK has no prefers-reduced-motion query; every transition here obeys gtk-enable-animations, which GNOME's Reduce Animation turns off */
+/* Hallmark · answered: 64 (labels) Geologica throughout; the one mono use is file contents (text preview, terminal), which is code */
+
+/* Kestrel's look, in one place: Vantage tokens, then libadwaita's own colour variables pointed at
+   them, so every stock widget (lists, popovers, dialogs, switches, preferences) follows without a
+   rule of its own. Light is the derived mode, dark is Vantage as drawn; the hue never moves. */
+
+:root {
+  /* the shared scale */
+  --dur-micro: 120ms; --dur-short: 220ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --radius-card: 4px; --radius-pill: 999px; --rule-hair: 1px;
+  --font-body: Geologica, "Adwaita Sans", Cantarell, system-ui, sans-serif;
+  --font-display: Geologica, "Adwaita Sans", Cantarell, system-ui, sans-serif;
+
+  /* light: Vantage re-derived (paper L 98 → 92, ink L 19, rules on paper-2, accent fill kept, its text darkened) */
+  --color-paper: oklch(98% 0.004 235); --color-paper-2: oklch(95.5% 0.007 235); --color-paper-3: oklch(92.5% 0.009 235);
+  --color-ink: oklch(19% 0.016 235); --color-ink-2: oklch(32% 0.016 235); --color-muted: oklch(47% 0.016 235);
+  --color-rule: oklch(89% 0.008 235); --color-rule-2: oklch(82% 0.010 235);
+  --color-accent: oklch(86% 0.19 126); --color-accent-hi: oklch(82% 0.19 126); --color-accent-ink: oklch(22% 0.05 126);
+  --color-accent-text: oklch(47% 0.13 132); --color-focus: oklch(55% 0.15 130);
+  --color-error: oklch(52% 0.17 27); --color-error-fill: oklch(58% 0.19 27); --color-error-ink: oklch(98% 0.01 27);
+  --color-success: oklch(50% 0.12 150); --color-warning: oklch(58% 0.13 75);
+  /* a document page (Markdown preview) stays a page, like a PDF, in either mode */
+  --color-page: oklch(99.5% 0.002 235); --color-page-ink: oklch(20% 0.012 235);
+  --color-shade: oklch(19% 0.016 235 / 0.07);
+  /* colour tags are data, not chrome: libadwaita's palette, named once */
+  --color-tag-red: var(--red-3); --color-tag-orange: var(--orange-3); --color-tag-yellow: var(--yellow-3);
+  --color-tag-green: var(--green-3); --color-tag-blue: var(--blue-3); --color-tag-purple: var(--purple-3);
+  --color-tag-gray: var(--light-5); --color-tag-ink: oklch(99% 0.002 235); --color-tag-edge: oklch(19% 0.016 235 / 0.15);
+}
+
+/* dark: style-dark.css, switched in by main.rs install_styles while libadwaita is dark */
+
+/* libadwaita's variables, all from the tokens: views on paper, chrome on paper-2, flat, hairlines */
+:root {
+  --window-bg-color: var(--color-paper); --window-fg-color: var(--color-ink);
+  --view-bg-color: var(--color-paper); --view-fg-color: var(--color-ink);
+  --headerbar-bg-color: var(--color-paper-2); --headerbar-fg-color: var(--color-ink);
+  --headerbar-backdrop-color: var(--color-paper-2); --headerbar-border-color: var(--color-ink);
+  --headerbar-shade-color: var(--color-rule); --headerbar-darker-shade-color: var(--color-rule-2);
+  --sidebar-bg-color: var(--color-paper-2); --sidebar-fg-color: var(--color-ink);
+  --sidebar-backdrop-color: var(--color-paper-2); --sidebar-border-color: var(--color-rule); --sidebar-shade-color: var(--color-rule);
+  --secondary-sidebar-bg-color: var(--color-paper-2); --secondary-sidebar-fg-color: var(--color-ink);
+  --secondary-sidebar-backdrop-color: var(--color-paper-2); --secondary-sidebar-border-color: var(--color-rule);
+  --secondary-sidebar-shade-color: var(--color-rule);
+  --card-bg-color: var(--color-paper-2); --card-fg-color: var(--color-ink); --card-shade-color: var(--color-rule);
+  --thumbnail-bg-color: var(--color-paper-2); --thumbnail-fg-color: var(--color-ink);
+  --dialog-bg-color: var(--color-paper); --dialog-fg-color: var(--color-ink);
+  --popover-bg-color: var(--color-paper-2); --popover-fg-color: var(--color-ink); --popover-shade-color: var(--color-shade);
+  --shade-color: var(--color-shade); --scrollbar-outline-color: var(--color-paper);
+  --accent-bg-color: var(--color-accent); --accent-fg-color: var(--color-accent-ink); --accent-color: var(--color-accent-text);
+  --destructive-bg-color: var(--color-error-fill); --destructive-fg-color: var(--color-error-ink); --destructive-color: var(--color-error);
+  --error-bg-color: var(--color-error-fill); --error-fg-color: var(--color-error-ink); --error-color: var(--color-error);
+  --success-color: var(--color-success); --warning-color: var(--color-warning);
+}
+
+/* ── type: Geologica, plain for reading, sharpened for titles; figures that compare are tabular ── */
+window, popover, tooltip {
+  font-family: var(--font-body);
+  font-variation-settings: "SHRP" 0;
+}
+.title-1, .title-2, .title-3, .title-4, statuspage .title, dialog .title {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-variation-settings: "SHRP" 100;
+  letter-spacing: -0.4px;
+}
+.statusbar, .numeric, .quick-hint {
+  font-feature-settings: "tnum";
+}
+.statusbar { color: var(--color-muted); }
+
+/* ── controls: 4px corners, hairline inputs, the primary action is the one lime pill ── */
+button:not(.circular):not(.pill), entry, spinbutton, dropdown > button, combobox > box > button,
+.card, list.boxed-list, row.activatable, popover > contents, tabbar tab, .data-table {
+  border-radius: var(--radius-card);
+}
+button.suggested-action, button.pill { border-radius: var(--radius-pill); }
+entry, spinbutton, searchbar entry {
+  background-color: var(--color-paper-2);
+  box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule-2);
+  caret-color: var(--color-accent-text);
+}
+/* a focus ring arrives at once, never animated (Floor 6) */
+button, entry, spinbutton, checkbutton, switch, row, tabbar tab, dropdown, menubutton > button {
+  transition-property: background-color, color, box-shadow, opacity;
+  transition-duration: var(--dur-short);
+  transition-timing-function: var(--ease-out);
+}
+*:focus-visible { outline-color: var(--color-focus); }
+entry:focus-within { outline-color: var(--color-focus); }
+
+/* ── the signature: the search box, the instrument everything starts from ── */
+.main-search {
+  min-height: 34px;
+  font-size: 1.05em;
+  background-color: var(--color-paper);
+  box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule-2);
+}
+.main-search:focus-within {
+  box-shadow: inset 0 0 0 var(--rule-hair) var(--color-focus);
+  outline-color: var(--color-focus);
+}
+/* Search Syntax: the examples are what you click, so they carry the accent */
+.syntax-example { color: var(--accent-color); }
+
+/* ── command bar ── */
+.command-bar { padding: 2px 0; background-color: var(--color-paper-2); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.command-bar > .toolbar { padding: 1px 6px; }
+.command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
+.command-bar separator { margin: 5px 3px; background-color: var(--color-rule); }
+/* greyed-out buttons read as off at a glance, not as a slightly lighter version of on */
+.command-bar button:disabled { filter: opacity(0.3); }
+/* command-bar sizes, picked by its width (window/mod.rs BAR_SIZES): large when there's room, compact
+   (and then two rows) when there isn't */
+.command-bar.large button, .command-bar.large splitbutton > button, .command-bar.large menubutton > button { min-height: 34px; min-width: 40px; }
+.command-bar.large image { -gtk-icon-size: 20px; }
+.command-bar.large splitbutton > menubutton > button { min-width: 16px; }
+.command-bar.large separator { margin: 6px 6px; }
+.command-bar.compact > .toolbar { padding: 1px 2px; border-spacing: 0; }
+.command-bar.compact button, .command-bar.compact splitbutton > button, .command-bar.compact menubutton > button { min-width: 22px; padding-left: 4px; padding-right: 4px; }
+.command-bar.compact separator { margin: 5px 1px; }
+
+/* ── panes, tabs, bars ── */
+/* compact tabs: less padding only, the font stays the size it was, so names never clip */
+.pane tabbar tabbox { padding-top: 3px; padding-bottom: 3px; min-height: 28px; }
+.pane tabbar tab { min-height: 22px; padding: 1px 4px; }
+.pane tabbar tab:selected, .pane tabbar tab:checked { box-shadow: inset 0 -2px 0 var(--color-accent); }
+.pane tabbar tab button.image-button { min-width: 20px; min-height: 20px; }
+.pane tabbar .start-action, .pane tabbar .end-action { padding-top: 3px; padding-bottom: 3px; }
+.pane tabbar .end-action button { min-height: 24px; min-width: 24px; padding: 0; }
+.inactive-pane tabbar, .inactive-pane .statusbar { opacity: 0.55; }
+.miller-col { border-right: var(--rule-hair) solid var(--color-rule); }
+.statusbar { min-height: 22px; border-top: var(--rule-hair) solid var(--color-rule); }
+.statusbar.error { color: var(--color-error); opacity: 1; }
+.location-bar { padding: 1px 6px; border-bottom: var(--rule-hair) solid var(--color-rule); min-height: 28px; }
+.location-bar .crumb { padding: 0 6px; min-height: 24px; }
+.chip-bar { padding: 4px 10px; border-bottom: var(--rule-hair) solid var(--color-rule); }
+menubutton.chip > button { padding: 2px 10px; min-height: 26px; border-radius: var(--radius-pill); box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule-2); background-color: transparent; }
+menubutton.chip.chip-active > button { background-color: color-mix(in srgb, var(--color-accent) 30%, transparent); color: var(--color-ink); box-shadow: inset 0 0 0 var(--rule-hair) var(--color-accent-text); }
+.preview-pane { background-color: var(--sidebar-bg-color); border-left: var(--rule-hair) solid var(--color-rule); }
+.preview-header { padding: 0 6px 0 14px; min-height: 34px; border-bottom: var(--rule-hair) solid var(--color-rule); }
+/* the terminal panel: text off the window edge, like every other view; its ground is the view's */
+vte-terminal { padding: 6px 10px; background-color: var(--color-paper); color: var(--color-ink); }
+.md-page, .md-page > viewport { background-color: var(--color-page); color: var(--color-page-ink); }
+
+/* drive usage: lime is how full, red when nearly full; a hairline track */
+levelbar.usage block.used { background-color: var(--color-accent); }
+levelbar.usage block.nearly-full { background-color: var(--color-error-fill); }
+levelbar.usage trough { min-height: 4px; }
+levelbar.usage block { min-height: 4px; }
+levelbar.usage block.empty { background-color: var(--color-rule); }
+
+/* ── colour tags ── */
+.tag-dot.tag-big { min-width: 16px; min-height: 16px; color: var(--color-tag-ink); box-shadow: inset 0 0 0 1px var(--color-tag-edge); }
+button.tag-pick { min-width: 22px; min-height: 22px; padding: 1px; }
+.tag-dot.tag-big.tag-small { min-width: 14px; min-height: 14px; }
+.tag-dot { min-width: 10px; min-height: 10px; border-radius: var(--radius-pill); }
+.tag-red { background-color: var(--color-tag-red); }
+.tag-orange { background-color: var(--color-tag-orange); }
+.tag-yellow { background-color: var(--color-tag-yellow); }
+.tag-green { background-color: var(--color-tag-green); }
+.tag-blue { background-color: var(--color-tag-blue); }
+.tag-purple { background-color: var(--color-tag-purple); }
+.tag-gray { background-color: var(--color-tag-gray); }
+
+/* ── quick search (kestrel --quick): one sheet of paper-2 over whatever you're doing ── */
+window.quick { background: none; }
+.quick-card { background-color: var(--color-paper); border-radius: 12px; box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule-2); }
+.quick-entry { min-height: 52px; font-size: 1.25em; background: none; box-shadow: none; outline: none; border-radius: 0; }
+.quick-list { background: none; }
+.quick-list row { border-radius: var(--radius-card); margin: 0 6px; padding: 5px 8px; }
+.quick-list row:selected { background-color: color-mix(in srgb, var(--color-accent) 28%, transparent); color: var(--color-ink); }
+.quick-heading { font-size: 0.85em; color: var(--color-muted); margin: 8px 16px 2px 16px; }
+.quick-kind { font-size: 0.85em; color: var(--color-muted); }
+.quick-hint { font-size: 0.85em; color: var(--color-muted); padding: 6px 14px; border-top: var(--rule-hair) solid var(--color-rule); }
+.quick-key { color: var(--color-ink-2); }
+.quick-confirm { color: var(--color-warning); }

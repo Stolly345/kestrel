@@ -1507,7 +1507,7 @@ impl Browser {
                 SearchState::Running => "Searching…".to_string(),
                 SearchState::Indexing => "Indexing…".to_string(),
                 SearchState::Done(o) => format!(
-                    "{} result{} · {} · {} ms",
+                    "{} result{}, {}, found in {} ms",
                     thousands(o.total as u64),
                     if o.total == 1 { "" } else { "s" },
                     glib::format_size(o.bytes),
@@ -1524,7 +1524,7 @@ impl Browser {
             let n = self.dir_sel.n_items();
             let mut s = format!("{} item{}", thousands(n as u64), if n == 1 { "" } else { "s" });
             if let Some(g) = self.git.borrow().as_ref() {
-                s = format!("\u{2387} {} · {s}", g.branch);
+                s = format!("Branch {}, {s}", g.branch);
             }
             s
         };
@@ -1533,7 +1533,7 @@ impl Browser {
             // ponytail: sums only the first 10k selected; Ctrl+A on a million search hits stays instant
             let infos = self.selected_infos();
             let bytes: u64 = infos.iter().take(10_000).filter(|i| !is_dirlike(i)).map(|i| i.size() as u64).sum();
-            s += &format!(" · {} selected ({})", thousands(sel), glib::format_size(bytes));
+            s += &format!(", {} selected ({})", thousands(sel), glib::format_size(bytes));
             if let [one] = infos.as_slice() {
                 s += &link_note(one);
             }

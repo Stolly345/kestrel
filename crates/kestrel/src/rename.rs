@@ -275,7 +275,7 @@ fn open(ops: &Rc<Ops>, files: Vec<gio::File>, others: Others) {
                         .subtitle(glib::markup_escape_text(&names[i]).as_str())
                         .build();
                     if let Some(why) = bad {
-                        row.set_subtitle(&format!("{} · {why}", glib::markup_escape_text(&names[i])));
+                        row.set_subtitle(&format!("{}: {why}", glib::markup_escape_text(&names[i])));
                         row.add_css_class("error");
                     }
                     preview.append(&row);

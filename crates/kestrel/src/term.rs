@@ -85,11 +85,14 @@ impl Term {
 
     fn spawn(self: &Rc<Self>, dir: Option<PathBuf>) -> vte4::Terminal {
         let term = vte4::Terminal::builder().scrollback_lines(10_000).vexpand(true).build();
-        // VTE is black whatever the theme; follow light/dark like the views around it
+        // VTE paints its own black ground whatever the theme: let the stylesheet's ground show
+        // through instead (vte-terminal in style.css), and take the text colour the stylesheet set
         let style = adw::StyleManager::default();
-        let colors = |t: &vte4::Terminal, dark: bool| {
-            let (fg, bg) = if dark { ("#ffffff", "#1e1e1e") } else { ("#2e3436", "#ffffff") };
-            t.set_colors(gtk::gdk::RGBA::parse(fg).ok().as_ref(), gtk::gdk::RGBA::parse(bg).ok().as_ref(), &[]);
+        term.set_clear_background(false);
+        let colors = |t: &vte4::Terminal, _dark: bool| {
+            let t = t.clone();
+            // the new colour lands once the theme change has restyled the widget
+            glib::idle_add_local_once(move || t.set_colors(Some(&t.color()), None, &[]));
         };
         colors(&term, style.is_dark());
         let weak = term.downgrade();

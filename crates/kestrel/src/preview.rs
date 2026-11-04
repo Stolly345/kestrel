@@ -639,7 +639,7 @@ fn archive_text(entries: &[crate::archive::Entry]) -> (String, String) {
     let bytes: u64 = files.iter().map(|e| e.size).sum();
     let s = |n: usize, w: &str| if n == 1 { format!("1 {w}") } else { format!("{n} {w}s") };
     let summary = format!(
-        "{}, {} · {} unpacked",
+        "{}, {}, {} unpacked",
         s(files.len(), "file"),
         s(dirs.len(), "folder"),
         glib::format_size(bytes)

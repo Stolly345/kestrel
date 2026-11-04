@@ -1,0 +1,22 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "restyle",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "vantage",
+  "axes": "dark/grotesk-sans/chromatic-lime",
+  "signature": "the search box as the instrument: lime caret and ring, results counted in tabular figures",
+  "sections": [
+   "file list",
+   "search results",
+   "preview pane",
+   "quick search",
+   "preferences"
+  ],
+  "waived": [],
+  "prompt": "a desktop file manager with instant whole-disk search for Linux power users",
+  "modes": "light+dark",
+  "date": "2026-11-04"
+ }
+]

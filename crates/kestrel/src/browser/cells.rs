@@ -205,14 +205,14 @@ pub(crate) fn bind_size(l: &gtk::Label, info: &gio::FileInfo) {
     });
 }
 
-/// " · → /target" for a symlink, " · 3 hard links" for a file with other names.
+/// ", links to /target" for a symlink, ", 3 hard links" for a file with other names.
 pub(crate) fn link_note(info: &gio::FileInfo) -> String {
     if let Some(t) = link_target(info) {
-        return format!(" · \u{2192} {}", t.display());
+        return format!(", links to {}", t.display());
     }
     let n = info.attribute_uint32("unix::nlink");
     if n > 1 && info.file_type() == gio::FileType::Regular {
-        format!(" · {n} hard links")
+        format!(", {n} hard links")
     } else {
         String::new()
     }

@@ -1,3 +1,5 @@
 target/
 .impeccable/
 evaluation-*.md
+.hallmark/*
+!.hallmark/log.json

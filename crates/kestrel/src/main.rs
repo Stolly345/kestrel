@@ -35,61 +35,32 @@ use browser::{Loc, Mode};
 use gtk::{gdk, gio, glib};
 use window::Win;
 
-const CSS: &str = "
-.command-bar { padding: 2px 0; }
-.command-bar > .toolbar { padding: 1px 6px; }
-.command-bar button, .command-bar splitbutton > button, .command-bar menubutton > button { min-height: 26px; padding-top: 0; padding-bottom: 0; }
-.command-bar separator { margin: 5px 3px; }
-/* Search Syntax: the examples are what you click, so they carry the accent */
-.syntax-example { color: @accent_color; }
-/* greyed-out buttons read as off at a glance, not as a slightly lighter version of on */
-.command-bar button:disabled { filter: opacity(0.3); }
-/* command-bar sizes, picked by its width (window/mod.rs BAR_SIZES): large when there's room, compact
-   (and then two rows) when there isn't */
-.command-bar.large button, .command-bar.large splitbutton > button, .command-bar.large menubutton > button { min-height: 34px; min-width: 40px; }
-.command-bar.large image { -gtk-icon-size: 20px; }
-.command-bar.large splitbutton > menubutton > button { min-width: 16px; }
-.command-bar.large separator { margin: 6px 6px; }
-.command-bar.compact > .toolbar { padding: 1px 2px; border-spacing: 0; }
-.command-bar.compact button, .command-bar.compact splitbutton > button, .command-bar.compact menubutton > button { min-width: 22px; padding-left: 4px; padding-right: 4px; }
-.command-bar.compact separator { margin: 5px 1px; }
-/* compact tabs: less padding only, the font stays the size it was, so names never clip */
-.pane tabbar tabbox { padding-top: 3px; padding-bottom: 3px; min-height: 28px; }
-.pane tabbar tab { min-height: 22px; padding: 1px 4px; }
-.pane tabbar tab button.image-button { min-width: 20px; min-height: 20px; }
-.pane tabbar .start-action, .pane tabbar .end-action { padding-top: 3px; padding-bottom: 3px; }
-.pane tabbar .end-action button { min-height: 24px; min-width: 24px; padding: 0; }
-.md-page, .md-page > viewport { background: #ffffff; color: #1e1e1e; }
-levelbar.usage block.used { background: @accent_bg_color; }
-levelbar.usage block.nearly-full { background: @error_bg_color; }
-levelbar.usage trough { min-height: 4px; }
-levelbar.usage block { min-height: 4px; }
-.inactive-pane tabbar, .inactive-pane .statusbar { opacity: 0.55; }
-.miller-col { border-right: 1px solid alpha(currentColor, 0.12); }
-.statusbar { min-height: 22px; }
-/* the terminal panel: text off the window edge, like every other view */
-vte-terminal { padding: 6px 10px; }
-.statusbar.error { color: @error_color; opacity: 1; }
-.location-bar { padding: 1px 6px; border-bottom: 1px solid alpha(currentColor, 0.08); min-height: 28px; }
-.location-bar .crumb { padding: 0 6px; min-height: 24px; }
-.main-search { min-height: 34px; font-size: 1.05em; }
-.chip-bar { padding: 4px 10px; border-bottom: 1px solid alpha(currentColor, 0.08); }
-menubutton.chip > button { padding: 2px 10px; min-height: 26px; border-radius: 99px; }
-menubutton.chip.chip-active > button { background: alpha(@accent_bg_color, 0.22); color: @accent_color; }
-.preview-pane { background: var(--sidebar-bg-color); border-left: 1px solid var(--border-color); }
-.preview-header { padding: 0 6px 0 14px; min-height: 34px; border-bottom: 1px solid var(--border-color); }
-.tag-dot.tag-big { min-width: 16px; min-height: 16px; color: white; box-shadow: inset 0 0 0 1px alpha(black, 0.15); }
-button.tag-pick { min-width: 22px; min-height: 22px; padding: 1px; }
-.tag-dot.tag-big.tag-small { min-width: 14px; min-height: 14px; }
-.tag-dot { min-width: 10px; min-height: 10px; border-radius: 99px; }
-.tag-red { background: @red_3; }
-.tag-orange { background: @orange_3; }
-.tag-yellow { background: @yellow_3; }
-.tag-green { background: @green_3; }
-.tag-blue { background: @blue_3; }
-.tag-purple { background: @purple_3; }
-.tag-gray { background: @light_5; }
-";
+/// Every style rule Kestrel has, Hallmark-stamped (theme Vantage), light tokens first.
+const CSS: &str = include_str!("style.css");
+/// Vantage's dark tokens, over CSS while libadwaita is dark.
+const CSS_DARK: &str = include_str!("style-dark.css");
+
+/// Load Kestrel's stylesheet, and its dark tokens whenever libadwaita is dark (the Style
+/// preference, or the system's). One stylesheet per mode instead of a prefers-color-scheme query:
+/// GTK only lets an app's stylesheet follow libadwaita's mode from 4.20.
+pub fn install_styles() {
+    let display = gdk::Display::default().unwrap();
+    let css = gtk::CssProvider::new();
+    css.load_from_string(CSS);
+    gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    let dark = gtk::CssProvider::new();
+    dark.load_from_string(CSS_DARK);
+    let apply = move |is_dark: bool| {
+        let display = gdk::Display::default().unwrap();
+        gtk::style_context_remove_provider_for_display(&display, &dark);
+        if is_dark {
+            gtk::style_context_add_provider_for_display(&display, &dark, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+        }
+    };
+    let style = adw::StyleManager::default();
+    apply(style.is_dark());
+    style.connect_dark_notify(move |s| apply(s.is_dark()));
+}
 
 const ACCELS: &[(&str, &[&str])] = &[
     ("win.new-tab", &["<Control>t"]),
@@ -231,9 +202,7 @@ fn main() -> glib::ExitCode {
         gtk::Window::set_default_icon_name("dev.kestrel.Kestrel");
         icon::follow_theme();
         prefs::apply_color_scheme(&prefs::get());
-        let css = gtk::CssProvider::new();
-        css.load_from_string(CSS);
-        gtk::style_context_add_provider_for_display(&gdk::Display::default().unwrap(), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        install_styles();
         for (action, keys) in ACCELS {
             app.set_accels_for_action(action, keys);
         }

@@ -24,6 +24,10 @@ pub struct Row {
     pub subtitle: String,
     pub icon: gio::Icon,
     pub act: Act,
+    /// What kind of thing it is, shown quietly at the row's end ("App", "Settings"); empty for files.
+    pub kind: &'static str,
+    /// The section it sits under before you type ("Pinned", "Recent"); empty while searching.
+    pub section: &'static str,
 }
 
 fn themed(name: &str) -> gio::Icon {
@@ -161,6 +165,8 @@ pub fn apps(q: &str, all: &[App], bonus: &dyn Fn(&str) -> i32, max: usize) -> Ve
             subtitle: if a.desc.is_empty() { "Application".into() } else { a.desc.clone() },
             icon: a.icon.clone(),
             act: Act::App(a.info.clone()),
+            kind: "App",
+            section: "",
         })
         .collect()
 }
@@ -231,13 +237,11 @@ pub fn settings(q: &str, pages: &[App], max: usize) -> Vec<Row> {
         .take(max)
         .map(|(_, a)| Row {
             title: a.name.clone(),
-            subtitle: if a.desc.is_empty() {
-                "Settings".into()
-            } else {
-                format!("Settings · {}", a.desc)
-            },
+            subtitle: a.desc.clone(),
             icon: a.icon.clone(),
             act: Act::App(a.info.clone()),
+            kind: "Settings",
+            section: "",
         })
         .collect()
 }
@@ -252,6 +256,8 @@ pub fn calc(q: &str) -> Option<Row> {
         subtitle: "Enter copies the answer".into(),
         icon: themed("accessories-calculator-symbolic"),
         act: Act::Copy(s),
+        kind: "Sum",
+        section: "",
     })
 }
 
@@ -296,6 +302,8 @@ pub fn web(q: &str, engines: &[WebSearch]) -> Option<Row> {
         subtitle: e.url.split('/').nth(2).unwrap_or_default().to_string(),
         icon: themed("web-browser-symbolic"),
         act: Act::Url(e.url.replace("{q}", &enc)),
+        kind: "Web",
+        section: "",
     })
 }
 
@@ -372,9 +380,11 @@ pub fn system(q: &str) -> Vec<Row> {
         .filter(|a| a.words.iter().any(|w| w.starts_with(&q)) || a.name.to_lowercase().starts_with(&q))
         .map(|a| Row {
             title: a.name.into(),
-            subtitle: if a.confirm { "System · asks before it acts".into() } else { "System".into() },
+            subtitle: if a.confirm { "Asks before it acts".into() } else { String::new() },
             icon: themed(a.icon),
             act: Act::System(a),
+            kind: "System",
+            section: "",
         })
         .collect()
 }
@@ -411,6 +421,8 @@ pub fn tips() -> Vec<Row> {
             subtitle: d.to_string(),
             icon: themed("dialog-information-symbolic"),
             act: Act::Insert(ins.to_string()),
+            kind: "Tip",
+            section: "",
         })
         .collect()
 }

@@ -520,7 +520,7 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
     let styles = ["full", "short", "extension"];
     let types = combo(
         "File type names",
-        "Full: Microsoft Excel Worksheet · Short: Excel · Extension: XLSX",
+        "Microsoft Excel Worksheet, Excel or XLSX",
         &["Full", "Short", "Extension"],
         styles.iter().position(|x| *x == s.type_style).unwrap_or(0) as u32,
     );
@@ -606,7 +606,7 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
         let r = gio::spawn_blocking(|| crate::search::stats("")).await.ok().flatten();
         st.set_subtitle(&match r {
             Some((n, b)) => format!(
-                "Running · {} files and folders you can see · {}",
+                "Running: {} files and folders you can see, {}",
                 crate::browser::thousands(n as u64),
                 glib::format_size(b)
             ),
