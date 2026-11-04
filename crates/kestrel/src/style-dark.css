@@ -1,12 +1,10 @@
 /* Hallmark · theme: Vantage · the dark mode, as drawn: loaded over style.css while libadwaita is dark
  * (main.rs install_styles), since a per-stylesheet prefers-color-scheme needs GTK 4.20 */
 :root {
-  /* Vantage as drawn: blue-black ground, steel ink, one lime signal */
+  /* Vantage as drawn: blue-black ground, steel ink, the system's accent */
   --color-paper: oklch(13.5% 0.012 235); --color-paper-2: oklch(17% 0.014 235); --color-paper-3: oklch(21% 0.016 235);
   --color-ink: oklch(95% 0.006 230); --color-ink-2: oklch(82% 0.012 230); --color-muted: oklch(66% 0.016 230);
   --color-rule: oklch(27% 0.014 235); --color-rule-2: oklch(34% 0.016 235);
-  --color-accent: oklch(89% 0.19 126); --color-accent-hi: oklch(93% 0.17 126); --color-accent-ink: oklch(19% 0.04 126);
-  --color-accent-text: oklch(89% 0.19 126); --color-focus: oklch(89% 0.19 126);
   --color-error: oklch(72% 0.15 27); --color-error-fill: oklch(62% 0.17 27); --color-error-ink: oklch(98% 0.01 27);
   --color-success: oklch(76% 0.13 150); --color-warning: oklch(80% 0.13 80);
   --color-shade: oklch(5% 0.01 235 / 0.35);

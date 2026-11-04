@@ -706,3 +706,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   keywords) and its pick history (an app opened for a query ranks first next time). Click starts it. Hidden for
   *This folder* scopes and when nothing fits. App list cached per process (`launcher::installed_apps`), refreshed by
   AppInfoMonitor. Before this, only the separate Quick Search window found apps.
+- **Unreleased (2026-11-04): system accent colour** (Alex). Kestrel follows Settings › Appearance › Accent colour
+  again, in light and dark: `--color-accent`, `-ink`, `-text` and `--color-focus` now come from libadwaita's
+  `--accent-bg-color` / `--accent-fg-color` / `--accent-color`, which Kestrel no longer overrides (0.9.40 replaced
+  them with a fixed lime). Selection, focus ring, search caret, primary buttons, switches and drive bars take the
+  system colour; the Vantage ground, ink and Geologica stay.

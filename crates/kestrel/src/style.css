@@ -1,6 +1,6 @@
 /* Hallmark · shape: app screen · genre: modern-minimal · theme: Vantage (deal 2/3, seed desktop-file-manager-instant-e92d·6a3690e6·2026-11-04·r0) · redesign: restyle
- * nav: kept (header bar, command bar, sidebar, tabs) · signature: the search box as the instrument, lime caret and ring, results counted in tabular figures · states: loading, empty, error, full (kept) · vantage: object/steel
- * axes: dark/grotesk-sans/chromatic-lime · posture: restrained · contrast: pass · modes: light+dark · v2.0.0 */
+ * nav: kept (header bar, command bar, sidebar, tabs) · signature: the search box as the instrument, accent caret and ring, results counted in tabular figures · states: loading, empty, error, full (kept) · vantage: object/steel
+ * axes: dark/grotesk-sans/system-accent · posture: restrained · contrast: pass · modes: light+dark · v2.0.0 */
 /* Hallmark · pre-emit critique: P3 H3 E4 S4 R3 V4 · weakest: H (hierarchy is libadwaita's), kept on purpose: the layout is the owner's at restyle depth */
 /* Hallmark · answered: 7 (reduced motion) GTK has no prefers-reduced-motion query; every transition here obeys gtk-enable-animations, which GNOME's Reduce Animation turns off */
 /* Hallmark · answered: 64 (labels) Geologica throughout; the one mono use is file contents (text preview, terminal), which is code */
@@ -21,8 +21,10 @@
   --color-paper: oklch(98% 0.004 235); --color-paper-2: oklch(95.5% 0.007 235); --color-paper-3: oklch(92.5% 0.009 235);
   --color-ink: oklch(19% 0.016 235); --color-ink-2: oklch(32% 0.016 235); --color-muted: oklch(47% 0.016 235);
   --color-rule: oklch(89% 0.008 235); --color-rule-2: oklch(82% 0.010 235);
-  --color-accent: oklch(86% 0.19 126); --color-accent-hi: oklch(82% 0.19 126); --color-accent-ink: oklch(22% 0.05 126);
-  --color-accent-text: oklch(47% 0.13 132); --color-focus: oklch(55% 0.15 130);
+  /* the accent is the system's (Settings › Appearance › Accent colour), as libadwaita gives it, in
+     both modes: Kestrel never sets its own, so blue, teal, red or any colour you pick shows here */
+  --color-accent: var(--accent-bg-color); --color-accent-hi: color-mix(in srgb, var(--accent-bg-color) 85%, white);
+  --color-accent-ink: var(--accent-fg-color); --color-accent-text: var(--accent-color); --color-focus: var(--accent-color);
   --color-error: oklch(52% 0.17 27); --color-error-fill: oklch(58% 0.19 27); --color-error-ink: oklch(98% 0.01 27);
   --color-success: oklch(50% 0.12 150); --color-warning: oklch(58% 0.13 75);
   /* a document page (Markdown preview) stays a page, like a PDF, in either mode */
@@ -53,7 +55,6 @@
   --dialog-bg-color: var(--color-paper); --dialog-fg-color: var(--color-ink);
   --popover-bg-color: var(--color-paper-2); --popover-fg-color: var(--color-ink); --popover-shade-color: var(--color-shade);
   --shade-color: var(--color-shade); --scrollbar-outline-color: var(--color-paper);
-  --accent-bg-color: var(--color-accent); --accent-fg-color: var(--color-accent-ink); --accent-color: var(--color-accent-text);
   --destructive-bg-color: var(--color-error-fill); --destructive-fg-color: var(--color-error-ink); --destructive-color: var(--color-error);
   --error-bg-color: var(--color-error-fill); --error-fg-color: var(--color-error-ink); --error-color: var(--color-error);
   --success-color: var(--color-success); --warning-color: var(--color-warning);
@@ -75,7 +76,7 @@ window, popover, tooltip {
 }
 .statusbar { color: var(--color-muted); }
 
-/* ── controls: 4px corners, hairline inputs, the primary action is the one lime pill ── */
+/* ── controls: 4px corners, hairline inputs, the primary action is the one accent pill ── */
 button:not(.circular):not(.pill), entry, spinbutton, dropdown > button, combobox > box > button,
 .card, list.boxed-list, row.activatable, popover > contents, tabbar tab, .data-table {
   border-radius: var(--radius-card);
@@ -153,7 +154,7 @@ menubutton.chip.chip-active > button { background-color: color-mix(in srgb, var(
 vte-terminal { padding: 6px 10px; background-color: var(--color-paper); color: var(--color-ink); }
 .md-page, .md-page > viewport { background-color: var(--color-page); color: var(--color-page-ink); }
 
-/* drive usage: lime is how full, red when nearly full; a hairline track */
+/* drive usage: the accent is how full, red when nearly full; a hairline track */
 levelbar.usage block.used { background-color: var(--color-accent); }
 levelbar.usage block.nearly-full { background-color: var(--color-error-fill); }
 levelbar.usage trough { min-height: 4px; }
