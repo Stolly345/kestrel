@@ -700,3 +700,9 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   action, switches and drive usage, replacing the distro accent. Geologica (OFL) ships with the package. Every
   screen keeps its layout. Status text drops the " · " joins ("3 results, 39 bytes, found in 5 ms"); quick search
   gets Pinned/Recent headings. All CSS in `style.css` + `style-dark.css`.
+- **Unreleased (2026-11-04): apps in the main search** (Alex). A whole-disk search whose text reads like a name (no
+  modifiers, wildcards, operators or `/`; two letters or more) shows up to four matching apps in an *Apps* row
+  between the location bar and the results, using Quick Search's matcher (`launcher::apps`: name, word, initials,
+  keywords) and its pick history (an app opened for a query ranks first next time). Click starts it. Hidden for
+  *This folder* scopes and when nothing fits. App list cached per process (`launcher::installed_apps`), refreshed by
+  AppInfoMonitor. Before this, only the separate Quick Search window found apps.

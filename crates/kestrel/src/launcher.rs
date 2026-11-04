@@ -1,4 +1,4 @@
-//! What the quick-search window finds besides files: apps, GNOME Settings pages, sums, web
+//! What the quick-search window finds besides files (apps also show above main-window results): apps, GNOME Settings pages, sums, web
 //! searches, system actions, and the `?` tips. Each provider turns the typed text into rows.
 
 use gtk::gio;
@@ -174,6 +174,34 @@ pub fn apps(q: &str, all: &[App], bonus: &dyn Fn(&str) -> i32, max: usize) -> Ve
 /// Installed apps that show in the app grid.
 pub fn all_apps() -> Vec<App> {
     gio::AppInfo::all().iter().filter(|a| a.should_show()).map(App::from_info).collect()
+}
+
+thread_local! {
+    /// The installed apps, listed once per process and again whenever one is installed or removed.
+    static APPS: std::cell::RefCell<Option<std::rc::Rc<Vec<App>>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installed apps for the main window's search (the quick window keeps its own list): listed on
+/// first use, refreshed by GIO's AppInfoMonitor.
+pub fn installed_apps() -> std::rc::Rc<Vec<App>> {
+    APPS.with(|a| {
+        if let Some(v) = a.borrow().as_ref() {
+            return v.clone();
+        }
+        let monitor = gio::AppInfoMonitor::get();
+        monitor.connect_changed(|_| APPS.with(|a| *a.borrow_mut() = None));
+        std::mem::forget(monitor);
+        let v = std::rc::Rc::new(all_apps());
+        *a.borrow_mut() = Some(v.clone());
+        v
+    })
+}
+
+/// Whether a main-window search reads as a name someone might give an app: no modifiers
+/// (`ext:`), wildcards, operators or paths, at least two letters.
+pub fn looks_like_app_query(q: &str) -> bool {
+    let q = q.trim();
+    q.chars().filter(|c| c.is_alphanumeric()).count() >= 2 && !q.contains(|c: char| ":*?|!<>\"/\\".contains(c))
 }
 
 /// GNOME Settings pages: each ships as a hidden gnome-*-panel.desktop with its own keywords
@@ -444,6 +472,13 @@ mod tests {
         assert_eq!(name_score("brow", "Firefox", &["Web Browser".into()]), 25);
         assert_eq!(name_score("zz", "Firefox", &[]), 0);
         assert_eq!(name_score("v", "Visual Studio Code", &[]), 80);
+    }
+
+    #[test]
+    fn app_queries() {
+        assert!(looks_like_app_query("firefox") && looks_like_app_query("libre office"));
+        assert!(!looks_like_app_query("f") && !looks_like_app_query("ext:pdf") && !looks_like_app_query("*.rs"));
+        assert!(!looks_like_app_query("src/main") && !looks_like_app_query("!tmp") && !looks_like_app_query("a | b"));
     }
 
     #[test]

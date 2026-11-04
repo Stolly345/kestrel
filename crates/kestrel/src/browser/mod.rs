@@ -192,6 +192,8 @@ pub struct Browser {
     miller_sel: RefCell<Option<gio::FileInfo>>,
     status: adw::StatusPage,
     statusbar: gtk::Label,
+    /// Apps whose names fit a whole-disk search, in a row above the results (searching::update_apps).
+    apps_bar: gtk::Box,
     // location bar
     loc_stack: gtk::Stack,
     crumbs: gtk::Box,
@@ -553,8 +555,10 @@ impl Browser {
             .margin_top(2)
             .margin_bottom(2)
             .build();
+        let apps_bar = gtk::Box::builder().spacing(4).css_classes(["app-strip"]).visible(false).build();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&loc_stack);
+        root.append(&apps_bar);
         root.append(&stack);
         root.append(&statusbar);
 
@@ -594,6 +598,7 @@ impl Browser {
             miller_sel: RefCell::default(),
             status,
             statusbar,
+            apps_bar,
             loc_stack,
             crumbs,
             loc_label,

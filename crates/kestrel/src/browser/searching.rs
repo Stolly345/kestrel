@@ -28,11 +28,13 @@ impl Browser {
         }
         *self.query.borrow_mut() = Some(text.to_string());
         *self.hl.borrow_mut() = crate::query_ui::highlight_terms(text);
+        self.update_apps();
         self.run_search();
     }
 
     pub fn set_scope(&self, s: Scope) {
         if self.scope.replace(s) != s && self.is_searching() {
+            self.update_apps();
             self.run_search();
         }
         self.update_locbar();
@@ -51,6 +53,7 @@ impl Browser {
         }
         *self.query.borrow_mut() = None;
         self.search.cancel();
+        self.update_apps();
         self.list.set_model(Some(&self.dir_sel));
         self.grid.set_model(Some(&self.dir_sel));
         self.dir_col.set_visible(false);
@@ -150,6 +153,58 @@ impl Browser {
             }
             b.update_status();
         });
+    }
+
+    /// The Apps row above whole-disk results: up to four installed apps whose name, a word of
+    /// it, its initials or its keywords fit the query (the quick window's matcher), ones you've
+    /// opened for this query first. Hidden for folder-scoped searches and for queries that use
+    /// the search syntax, which are about files.
+    pub(super) fn update_apps(&self) {
+        let bar = &self.apps_bar;
+        while let Some(c) = bar.first_child() {
+            bar.remove(&c);
+        }
+        let q = self.query().unwrap_or_default();
+        let wanted = self.scope.get() == Scope::Everywhere && crate::launcher::looks_like_app_query(&q);
+        let rows = if wanted {
+            let bonus: std::collections::HashMap<String, i32> = crate::picks::prefer(&q).into_iter().collect();
+            let bonus = |k: &str| bonus.get(k).copied().unwrap_or(0) / 10;
+            crate::launcher::apps(&q.trim().to_lowercase(), &crate::launcher::installed_apps(), &bonus, 4)
+        } else {
+            Vec::new()
+        };
+        bar.set_visible(!rows.is_empty());
+        if rows.is_empty() {
+            return;
+        }
+        bar.append(&gtk::Label::builder().label("Apps").css_classes(["app-strip-label"]).build());
+        for r in rows {
+            let crate::launcher::Act::App(info) = r.act else { continue };
+            let inner = gtk::Box::builder().spacing(8).build();
+            inner.append(&gtk::Image::builder().gicon(&r.icon).pixel_size(24).build());
+            inner.append(&gtk::Label::builder().label(&r.title).ellipsize(gtk::pango::EllipsizeMode::End).max_width_chars(24).build());
+            let b = gtk::Button::builder()
+                .child(&inner)
+                .tooltip_text(&r.subtitle)
+                .css_classes(["flat", "app-chip"])
+                .build();
+            b.update_property(&[
+                gtk::accessible::Property::Label(&format!("Open {}", r.title)),
+                gtk::accessible::Property::Description(&r.subtitle),
+            ]);
+            let me = self.me.clone();
+            b.connect_clicked(move |b| {
+                let Some(br) = me.upgrade() else { return };
+                if let Some(q) = br.query() {
+                    crate::picks::record(&q, &crate::launcher::app_key(&info));
+                }
+                let ctx = gtk::prelude::WidgetExt::display(b).app_launch_context();
+                if let Err(e) = info.launch(&[], Some(&ctx)) {
+                    br.statusbar.set_label(&format!("Couldn't start {}: {}", info.name(), e.message()));
+                }
+            });
+            bar.append(&b);
+        }
     }
 
     fn sort_quietly(&self, col: Option<&gtk::ColumnViewColumn>, order: gtk::SortType) {

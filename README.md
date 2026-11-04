@@ -60,6 +60,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - **Best Match order**: the whole name beats its start, which beats the start of a word (`OwnerInvoice`, `old_report`), which beats anywhere. Your own folders (Desktop, Documents, Downloads, projects) rank up; caches, `node_modules`, build output and hidden folders rank down; this week's files edge ahead. Click a column header to sort by it instead
 - **Learns what you open**: a result you opened for a query moves up the next time you type it (or a shorter or longer version of it). Kept in `~/.config/kestrel/picks.json`, never sent anywhere
 - **Typing narrows**: when `repo` becomes `repor`, the service filters the last results instead of searching the whole disk again (5–7× faster per keystroke)
+- **Apps too**: a whole-disk search for a name like `calc` or `vsc` shows matching apps in a row above the files (by name, word, initials or keywords); click one to start it
 - Type-aware: `.deb` lists .deb files first; `pdf`, `word`, `excel`, `powerpoint` also find files of that type (`budget excel` finds `Budget.xlsx`)
 - Scope switch (Everywhere / This folder / This folder only), filter chips, match highlighting, recent and saved searches, a syntax cheat sheet in the menu
 - `ks`: the same search on the command line, like Everything's `es.exe`
