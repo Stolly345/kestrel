@@ -10,3 +10,8 @@ Categories=GTK;GNOME;System;FileTools;FileManager;Core;
 MimeType=inode/directory;
 Keywords=files;folders;search;everything;explorer;
 StartupNotify=true
+Actions=quick-search;
+
+[Desktop Action quick-search]
+Name=Quick Search
+Exec=kestrel --quick

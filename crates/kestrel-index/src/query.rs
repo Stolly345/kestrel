@@ -26,6 +26,9 @@ pub struct Query {
     pub reads: bool,
     /// Extensions the user typed as a type (`.deb`, `excel`): those hits rank first.
     pub boost: Vec<Vec<u8>>,
+    /// The plain words typed (lowercased, no modifiers, wildcards or negations): what Best Match
+    /// scores names against.
+    pub words: Vec<Vec<u8>>,
 }
 
 impl Query {
@@ -119,18 +122,41 @@ impl Query {
                 _ => boost.extend(type_word(&t).map(ext_list).unwrap_or_default()),
             }
         }
+        let words = toks
+            .iter()
+            .filter(|t| !t.is_empty() && !t.starts_with('!') && !t.contains([':', '/', '*', '?', '|', '<', '>']))
+            .map(|t| crate::lowercase(t.as_bytes()))
+            .collect();
         let root = Node::All(seq(&mut toks.into_iter(), &mut dupe, false)?);
         Ok(Query {
             reads: cost(&root) >= 3,
             root,
             dupe,
             boost,
+            words,
         })
     }
 
     pub fn matches(&self, ix: &Index, i: u32) -> bool {
         eval(&self.root, ix, i)
     }
+}
+
+/// Can `new`'s hits be found by filtering `old`'s instead of searching again? True when both are
+/// plain words (name substrings ANDed together) and `new` only adds letters or words to `old`:
+/// `repo` → `repor` → `repor 2026`. Anything with syntax (`|`, `!`, `ext:`, `/`, wildcards) or a
+/// type word (`pdf`, `excel`, which also match by type) searches afresh.
+pub fn narrows(old: &str, new: &str) -> bool {
+    let (old, new) = (old.trim_start(), new.trim_start());
+    new.len() > old.len() && new.starts_with(old) && plain(old) && plain(new)
+}
+
+/// Only plain words: name substrings ANDed together, no syntax and no type words.
+pub fn plain(s: &str) -> bool {
+    !s.trim().is_empty()
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || c.is_whitespace() || matches!(c, '.' | '-' | '_' | ',' | '\'' | '(' | ')' | '[' | ']' | '+' | '&' | '#' | '@'))
+        && s.split_whitespace().all(|w| type_word(&w.to_lowercase()).is_none())
 }
 
 /// Terms up to the end (or the `>` closing this group): AND of terms, `|` binding tighter.
@@ -778,6 +804,66 @@ mod tests {
         assert_eq!(n("da:today file:"), ["Écoles CAFÉ.txt"]);
         assert_eq!(n("dc:<2000"), Vec::<String>::new(), "unknown birth time never matches");
         assert_eq!(n("len:9"), ["straße.md"], "characters, not bytes");
+    }
+
+    #[test]
+    fn best_match_ranks_names_then_places() {
+        let now = Local::now().timestamp();
+        let mut ix = Index::default();
+        let root = ix.push(NO_PARENT, b"/", Kind::Dir, 0, 0, 0o755, 0, 0);
+        let home = ix.push(root, b"home", Kind::Dir, 0, 0, 0o755, 0, 0);
+        let alex = ix.push(home, b"alex", Kind::Dir, 0, 0, 0o755, 0, 0);
+        let docs = ix.push(alex, b"Documents", Kind::Dir, 0, 0, 0o755, 0, 0);
+        let nm = ix.push(alex, b"node_modules", Kind::Dir, 0, 0, 0o755, 0, 0);
+        let usr = ix.push(root, b"usr", Kind::Dir, 0, 0, 0o755, 0, 0);
+        ix.push(nm, b"report.js", Kind::File, 1, now, 0o644, 0, 0);
+        ix.push(usr, b"report.txt", Kind::File, 1, 0, 0o644, 0, 0);
+        ix.push(docs, b"report.pdf", Kind::File, 1, now, 0o644, 0, 0);
+        ix.push(docs, b"old_reports_archive.zip", Kind::File, 1, 0, 0o644, 0, 0);
+        ix.push(docs, b"misreported.txt", Kind::File, 1, 0, 0o644, 0, 0);
+        let run = |q: &str, prefer: Vec<(u32, i32)>| -> Vec<String> {
+            let q = Query::parse(q).unwrap();
+            let extra = crate::Extra { prefer, ..Default::default() };
+            let (hits, _) = ix.search_with(&q, Sort::Relevance, false, None, Some(10), &std::sync::atomic::AtomicBool::new(false), &extra);
+            hits.into_iter().map(|i| String::from_utf8_lossy(&ix.path(i)).into_owned()).collect()
+        };
+        assert_eq!(
+            run("report", vec![]),
+            [
+                "/home/alex/Documents/report.pdf",
+                "/usr/report.txt",
+                "/home/alex/Documents/old_reports_archive.zip",
+                "/home/alex/Documents/misreported.txt",
+                "/home/alex/node_modules/report.js",
+            ],
+            "whole name in your folders, then elsewhere, then word starts, then anywhere; node_modules last"
+        );
+        let mut cx = Index::default();
+        let r = cx.push(NO_PARENT, b"/", Kind::Dir, 0, 0, 0o755, 0, 0);
+        cx.push(r, b"misreported.txt", Kind::File, 1, 0, 0o644, 0, 0);
+        cx.push(r, b"OwnerReportPdf.php", Kind::File, 1, 0, 0o644, 0, 0);
+        let q = Query::parse("report").unwrap();
+        let (hits, _) = cx.search_top(&q, Sort::Relevance, false, None, Some(10), &std::sync::atomic::AtomicBool::new(false));
+        assert_eq!(cx.name(hits[0]), b"OwnerReportPdf.php", "camelCase starts a word");
+        let mis = ix.lookup(std::path::Path::new("/home/alex/Documents/misreported.txt")).unwrap();
+        assert_eq!(
+            run("report", vec![(mis, 500)])[0],
+            "/home/alex/Documents/misreported.txt",
+            "what you opened before comes first"
+        );
+    }
+
+    #[test]
+    fn narrowing_only_for_plain_words() {
+        assert!(narrows("repo", "repor"));
+        assert!(narrows("repo", "repo 2026"));
+        assert!(!narrows("repo", "repo"), "same query: nothing to narrow");
+        assert!(!narrows("repo", "repo|x"), "OR widens");
+        assert!(!narrows("repo", "repo/src"), "a / turns it into a path match");
+        assert!(!narrows("pic", "pic:"), "a modifier is not a name");
+        assert!(!narrows("pd", "pdf"), "type words also match by type");
+        assert!(!narrows("a b", "a c"));
+        assert!(!narrows("", "a"));
     }
 
     #[test]

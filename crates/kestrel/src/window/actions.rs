@@ -82,8 +82,13 @@ impl Win {
         });
         // from a search result: its folder, with it selected (Back returns to the results)
         self.act("locate", |w| {
-            let (Some(b), Some(f)) = (w.current(), w.sel().into_iter().next()) else { return };
+            let (Some(b), Some(f)) = (w.current(), w.sel().into_iter().next()) else {
+                return;
+            };
             let (Some(dir), Some(name)) = (f.parent(), f.basename()) else { return };
+            if let (Some(q), Some(p)) = (b.query(), f.path()) {
+                crate::picks::record(&q, &p.to_string_lossy());
+            }
             b.go(Loc::Dir(dir));
             b.select_when_loaded(vec![name.to_string_lossy().into_owned()], || {});
         });
@@ -348,7 +353,9 @@ impl Win {
         let me = self.me.clone();
         let a = gio::SimpleAction::new("new-doc", Some(glib::VariantTy::STRING));
         a.connect_activate(move |_, v| {
-            let (Some(w), Some(id)) = (me.upgrade(), v.and_then(|v| v.get::<String>())) else { return };
+            let (Some(w), Some(id)) = (me.upgrade(), v.and_then(|v| v.get::<String>())) else {
+                return;
+            };
             let (Some(b), Some(&(_, kind, name, contents))) = (w.current(), super::NEW_DOCS.iter().find(|d| d.0 == id)) else {
                 return;
             };

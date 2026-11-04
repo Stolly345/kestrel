@@ -6,16 +6,16 @@ mod fan;
 mod http;
 mod share;
 
-use kestrel_index::proto::{Hit, Request, Response, ShareState, ShareStatus, socket_path};
+use kestrel_index::proto::{Hit, MAX_PREFER, Request, Response, ShareState, ShareStatus, socket_path};
 use kestrel_index::scan::{load_excludes, local_mounts, network_mounted, network_shares, reconcile, scan_all};
-use kestrel_index::{Cred, Index, Kind, Query, Sort};
+use kestrel_index::{Cred, Extra, Index, Kind, Query, Sort};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -541,7 +541,16 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
                     let key = (req.q.clone(), req.sort, req.desc, ix.epoch);
                     let want = req.limit.map(|l| req.offset.saturating_add(l));
                     if !(req.more && cache.as_ref().is_some_and(|(k, ..)| *k == key)) {
-                        let (hits, sorted) = search_unless_hung_up(&ix, &q, &req, cred, want, fd);
+                        let extra = Extra {
+                            within: narrow_from(cred, &req.q, &ix),
+                            prefer: req
+                                .prefer
+                                .iter()
+                                .take(MAX_PREFER)
+                                .filter_map(|(p, bonus)| Some((ix.lookup(Path::new(p))?, (*bonus).clamp(0, 1000))))
+                                .collect(),
+                        };
+                        let (hits, sorted) = search_unless_hung_up(&ix, &q, &req, cred, want, fd, &extra).unwrap_or_default();
                         cache = Some((key, hits, sorted));
                     }
                     let (_, hits, sorted) = cache.as_mut().unwrap();
@@ -588,7 +597,68 @@ fn handle(conn: UnixStream, ix: &RwLock<Index>, cred: &Cred) -> std::io::Result<
 }
 
 /// Search, giving up if the client hangs up meanwhile (it started a newer query).
-fn search_unless_hung_up(ix: &Index, q: &Query, req: &Request, cred: &Cred, top: Option<usize>, fd: std::os::fd::RawFd) -> (Vec<u32>, usize) {
+/// Each user's last finished search (query, index epoch, hits), so the next keystroke can filter
+/// those hits instead of searching the whole index again (`repo` → `repor`). The app opens a new
+/// connection per query, so this lives across connections; it is keyed by uid and holds only hits
+/// that user was already allowed to see, and is used only while the user's groups are unchanged.
+struct LastHits {
+    gids: Vec<u32>,
+    q: String,
+    epoch: u64,
+    hits: Vec<u32>,
+    /// Index length then: entries added since (new files) are candidates too.
+    len: u32,
+}
+
+/// Bigger results aren't kept (see `narrow_from`).
+const NARROW_MAX: usize = 2_000_000;
+
+static LAST: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<u32, LastHits>>> = std::sync::LazyLock::new(Default::default);
+
+fn narrow_from(cred: &Cred, q: &str, ix: &Index) -> Option<Vec<u32>> {
+    let last = LAST.lock().unwrap();
+    let l = last.get(&cred.uid)?;
+    // filtering a quarter of the index or more is slower than scanning it in order
+    if l.gids != cred.gids || l.epoch != ix.epoch || l.hits.len() > ix.len() / 4 || !kestrel_index::query::narrows(&l.q, q) {
+        return None;
+    }
+    let mut v = l.hits.clone();
+    v.extend(l.len..ix.len() as u32);
+    Some(v)
+}
+
+fn remember_hits(cred: &Cred, q: &str, ix: &Index, hits: &[u32]) {
+    if !kestrel_index::query::plain(q) {
+        return; // folder sizes, scoped and syntax queries never narrow: keep the typing context
+    }
+    let mut last = LAST.lock().unwrap();
+    if hits.len() > NARROW_MAX {
+        last.remove(&cred.uid);
+        return;
+    }
+    let hits = hits.to_vec();
+    last.insert(
+        cred.uid,
+        LastHits {
+            gids: cred.gids.clone(),
+            q: q.to_string(),
+            epoch: ix.epoch,
+            hits,
+            len: ix.len() as u32,
+        },
+    );
+}
+
+/// Search, giving up if the client hangs up meanwhile (it started a newer query): then None.
+fn search_unless_hung_up(
+    ix: &Index,
+    q: &Query,
+    req: &Request,
+    cred: &Cred,
+    top: Option<usize>,
+    fd: std::os::fd::RawFd,
+    extra: &Extra,
+) -> Option<(Vec<u32>, usize)> {
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     let (cancel, done) = (AtomicBool::new(false), AtomicBool::new(false));
     std::thread::scope(|s| {
@@ -603,9 +673,13 @@ fn search_unless_hung_up(ix: &Index, q: &Query, req: &Request, cred: &Cred, top:
                 }
             }
         });
-        let r = ix.search_top(q, req.sort, req.desc, Some(cred), top, &cancel);
+        let r = ix.search_with(q, req.sort, req.desc, Some(cred), top, &cancel, extra);
         done.store(true, Relaxed);
-        r
+        if cancel.load(Relaxed) {
+            return None;
+        }
+        remember_hits(cred, &req.q, ix, &r.0);
+        Some(r)
     })
 }
 

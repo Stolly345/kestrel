@@ -60,6 +60,15 @@ pub struct Settings {
     pub last_update_check: u64,
     /// Names the user gave colour tags ("red" -> "Taxes"); unnamed tags go by their colour.
     pub tag_names: std::collections::BTreeMap<String, String>,
+    /// The quick-search window's shortcut (GTK accelerator), registered with GNOME when on.
+    pub quick_shortcut: String,
+    pub quick_enabled: bool,
+    /// Recent items shown in the quick-search window before you type.
+    pub quick_recent: u32,
+    /// Open the quick-search window with an empty box (else the last search, selected).
+    pub quick_clear_on_open: bool,
+    /// Web searches in the quick-search window (`g rust`); empty = the built-in ones.
+    pub web_searches: Vec<crate::launcher::WebSearch>,
 }
 
 impl Default for Settings {
@@ -78,11 +87,25 @@ impl Default for Settings {
             check_updates: true,
             last_update_check: 0,
             tag_names: Default::default(),
+            quick_shortcut: "<Control><Alt>space".into(),
+            quick_enabled: false,
+            quick_recent: 8,
+            quick_clear_on_open: true,
+            web_searches: Vec::new(),
         }
     }
 }
 
 impl Settings {
+    /// The web searches in use: yours, or the built-in ones if you haven't set any.
+    pub fn web(&self) -> Vec<crate::launcher::WebSearch> {
+        if self.web_searches.is_empty() {
+            crate::launcher::default_web()
+        } else {
+            self.web_searches.clone()
+        }
+    }
+
     pub fn view(&self) -> Mode {
         Mode::parse(&self.default_view)
     }
@@ -313,6 +336,113 @@ fn columns_group(apply: std::rc::Rc<dyn Fn()>) -> adw::PreferencesGroup {
     group
 }
 
+/// Shortcut text for people: "<Control><Alt>space" → "Ctrl+Alt+Space".
+fn shortcut_label(accel: &str) -> String {
+    gtk::accelerator_parse(accel).map_or_else(|| accel.to_string(), |(k, m)| gtk::accelerator_get_label(k, m).to_string())
+}
+
+/// Preferences › General › Quick Search: the shortcut that opens `kestrel --quick` from anywhere.
+fn quick_group(s: &Settings, toast: impl Fn(&str) + Clone + 'static) -> adw::PreferencesGroup {
+    let g = adw::PreferencesGroup::builder()
+        .title("Quick Search")
+        .description("A small search window you can open from anywhere: apps, files, settings, sums (2^10*3), web searches (g rust), and lock, sleep or restart. Type ? in it for tips.")
+        .build();
+    let on = switch("Open with a shortcut", "Adds it to GNOME's custom keyboard shortcuts", s.quick_enabled);
+    let key = adw::ActionRow::builder().title("Shortcut").subtitle(shortcut_label(&s.quick_shortcut)).build();
+    let change = gtk::Button::builder().label("Change…").valign(gtk::Align::Center).build();
+    key.add_suffix(&change);
+    key.set_sensitive(s.quick_enabled);
+    let apply = {
+        let toast = toast.clone();
+        move |enabled: bool, accel: &str| match crate::quick::set_shortcut(enabled.then_some(accel)) {
+            Ok(()) => {
+                if enabled && let Some(other) = crate::quick::shortcut_clash(accel) {
+                    toast(&format!(
+                        "{} is also GNOME's \u{201c}{other}\u{201d} shortcut; pick another if it doesn't open Quick Search",
+                        shortcut_label(accel)
+                    ));
+                }
+            }
+            Err(e) => toast(&e),
+        }
+    };
+    let (k2, ap) = (key.clone(), apply.clone());
+    on.connect_active_notify(move |r| {
+        update(|s| s.quick_enabled = r.is_active());
+        k2.set_sensitive(r.is_active());
+        ap(r.is_active(), &get().quick_shortcut);
+    });
+    let k2 = key.clone();
+    change.connect_clicked(move |b| {
+        let dialog = adw::AlertDialog::builder()
+            .heading("Press the New Shortcut")
+            .body("Use a key with Ctrl, Alt or Super, like Ctrl+Alt+Space. Esc cancels.")
+            .build();
+        dialog.add_response("cancel", "Cancel");
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (d, row, ap) = (dialog.clone(), k2.clone(), apply.clone());
+        keys.connect_key_pressed(move |_, k, _, m| {
+            let m = m & gtk::accelerator_get_default_mod_mask();
+            if k == gtk::gdk::Key::Escape && m.is_empty() {
+                d.close();
+                return gtk::glib::Propagation::Stop;
+            }
+            let modifier_only = matches!(
+                k,
+                gtk::gdk::Key::Control_L
+                    | gtk::gdk::Key::Control_R
+                    | gtk::gdk::Key::Alt_L
+                    | gtk::gdk::Key::Alt_R
+                    | gtk::gdk::Key::Super_L
+                    | gtk::gdk::Key::Super_R
+                    | gtk::gdk::Key::Shift_L
+                    | gtk::gdk::Key::Shift_R
+                    | gtk::gdk::Key::Meta_L
+                    | gtk::gdk::Key::Meta_R
+            );
+            let fkey = (gtk::gdk::Key::F1..=gtk::gdk::Key::F12).contains(&k);
+            if modifier_only || (m.is_empty() && !fkey) {
+                return gtk::glib::Propagation::Stop;
+            }
+            let accel = gtk::accelerator_name(k.to_lower(), m).to_string();
+            update(|s| s.quick_shortcut = accel.clone());
+            row.set_subtitle(&shortcut_label(&accel));
+            ap(get().quick_enabled, &accel);
+            d.close();
+            gtk::glib::Propagation::Stop
+        });
+        dialog.add_controller(keys);
+        dialog.present(Some(b));
+    });
+    let recent = adw::SpinRow::with_range(0.0, 20.0, 1.0);
+    recent.set_title("Recent items");
+    recent.set_subtitle("Shown before you type, under anything pinned");
+    recent.set_value(s.quick_recent as f64);
+    recent.connect_value_notify(|r| update(|s| s.quick_recent = r.value() as u32));
+    let clear = switch(
+        "Start with an empty box",
+        "Off: the last search stays, selected, so typing replaces it",
+        s.quick_clear_on_open,
+    );
+    clear.connect_active_notify(|r| update(|s| s.quick_clear_on_open = r.is_active()));
+    let forget = adw::ButtonRow::builder().title("Clear Recent Items").build();
+    let t2 = toast.clone();
+    forget.connect_activated(move |_| {
+        crate::picks::update(|p| {
+            p.recent.clear();
+            p.by_query.clear();
+        });
+        t2("Recent items and search history cleared; pinned items stay");
+    });
+    g.add(&on);
+    g.add(&key);
+    g.add(&recent);
+    g.add(&clear);
+    g.add(&forget);
+    g
+}
+
 fn switch(title: &str, subtitle: &str, on: bool) -> adw::SwitchRow {
     adw::SwitchRow::builder().title(title).subtitle(subtitle).active(on).build()
 }
@@ -420,6 +550,7 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
     typing.connect_active_notify(|r| update(|s| s.type_to_search = r.is_active()));
     search.add(&typing);
     page.add(&search);
+    page.add(&quick_group(&s, toast.clone()));
 
     let system = adw::PreferencesGroup::builder().title("System").build();
     let fm = switch(

@@ -233,6 +233,11 @@ pub struct Browser {
     /// Words of the query to bold in result names.
     hl: Rc<RefCell<Vec<String>>>,
     scope: Cell<Scope>,
+    /// While searching: the folder view's sort column and order, put back when the search ends.
+    /// Results come in Best Match order until a column header is clicked.
+    folder_sort: RefCell<Option<(Option<gtk::ColumnViewColumn>, gtk::SortType)>>,
+    /// Set while Kestrel itself changes the column sort, so that isn't taken as a header click.
+    sorting_quietly: Cell<bool>,
     search_state: RefCell<SearchState>,
     /// Folder view scroll positions (list, grid), restored when a search is cleared.
     saved_scroll: Cell<(f64, f64)>,
@@ -620,6 +625,8 @@ impl Browser {
             query: RefCell::default(),
             hl,
             scope: Cell::new(Scope::Everywhere),
+            folder_sort: RefCell::default(),
+            sorting_quietly: Cell::new(false),
             search_state: RefCell::new(SearchState::Running),
             saved_scroll: Cell::new((0.0, 0.0)),
             show_hidden,
@@ -664,6 +671,7 @@ impl Browser {
             s.connect_changed(move |_, _| {
                 if let Some(b) = w.upgrade()
                     && b.is_searching()
+                    && !b.sorting_quietly.get()
                 {
                     b.run_search();
                 }
@@ -1544,6 +1552,9 @@ impl Browser {
     pub fn open_info(&self, info: &gio::FileInfo) {
         if let Some(q) = self.query() {
             crate::sidebar::remember_search(&q);
+            if let Some(p) = info_file(info).and_then(|f| f.path()) {
+                crate::picks::record(&q, &p.to_string_lossy());
+            }
         }
         if is_dirlike(info) {
             if let Some(f) = nav_target(info) {

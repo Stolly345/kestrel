@@ -96,3 +96,22 @@ Runtime, recommended, build and test-sample dependencies: README.md.
 - ~~No conflict dialog~~ — Skip / Keep Both / Replace since 0.4.0 (also for extract since 0.9.10); a failed item
   no longer stops a batch (0.9.13).
 - Not click-tested since 0.9.10: Broadway can't run inside the Claude sandbox (unix sockets blocked).
+
+## Heimdall-inspired search (2026-11-03, branch `heimdall-features`)
+Ideas from [Heimdall](https://github.com/Kryzern/Heimdall), a Windows launcher with the same arena-of-names engine.
+- **`Sort::Relevance` (Best Match)**, `kestrel-index/src/lib.rs` `rank`: two stages. Every hit gets a cheap name
+  score (`name_score`: whole name / stem 120, whole first word 90, prefix 70, whole inner word 60, word start incl.
+  camelCase and letter↔digit 45, anywhere 15; −len/4; typed type +300); the best `max(4×top, 2000)` then get
+  `place_score` from the path (noise folders −100, hidden −40, system −25, your own top-level folders +30, depth −2
+  per level, modified this week +12). The GUI uses it unless a column header is clicked; `ks -s best`.
+- **Learned picks**: `Request.prefer` = (path, bonus) pairs from `~/.config/kestrel/picks.json` (`picks.rs`); the
+  daemon resolves each with `lookup` and adds the bonus. Same query ×10, prefix-related query ×6; fades over 30 days.
+- **Narrowing**: `kestrel-indexd` keeps each uid's last plain-word result (`LAST`, ≤2M hits, same gids and epoch) and
+  searches only those hits plus entries added since when the new query extends it (`query::narrows`). Skipped
+  when the old result is over a quarter of the index (scanning in order is faster). Tests check it matches a fresh search.
+- **Quick search** (`quick.rs`, `launcher.rs`, `calc.rs`): `kestrel --quick` is its own unique GApplication
+  (`dev.kestrel.Kestrel.Quick`) that holds itself after the first use. The shortcut is a GNOME custom keybinding
+  written by Preferences (`quick::set_shortcut`, path `.../custom-keybindings/kestrel-quick/`). Headless check:
+  `GDK_BACKEND=broadway kestrel --quick --type TEXT --screenshot OUT.png`.
+- Benchmark: `cargo run --release --example rank -- / -- a re report readme` (name sort vs Best Match vs narrowed).
+- Not ported: window switcher (`>`, needs a GNOME Shell extension on Wayland), the glass shader, tray icon, self-updating.

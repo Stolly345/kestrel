@@ -27,7 +27,13 @@ pub struct Request {
     /// Ask for the network shares' listing status instead of searching (`q` is ignored).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shares: bool,
+    /// Paths this user opened for this query before, with a bonus each: they rank higher under
+    /// `Sort::Relevance` if they match. At most `MAX_PREFER` are used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefer: Vec<(String, i32)>,
 }
+
+pub const MAX_PREFER: usize = 50;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Response {

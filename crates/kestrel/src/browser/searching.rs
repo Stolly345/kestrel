@@ -20,6 +20,11 @@ impl Browser {
             self.grid.set_model(Some(&self.search_sel));
             self.dir_col.set_visible(true);
             self.git_col.set_visible(false);
+            // results start in Best Match order: no column shows as sorted until one is clicked
+            if let Some(s) = self.list.sorter().and_downcast::<gtk::ColumnViewSorter>() {
+                *self.folder_sort.borrow_mut() = Some((s.primary_sort_column(), s.primary_sort_order()));
+                self.sort_quietly(None, gtk::SortType::Ascending);
+            }
         }
         *self.query.borrow_mut() = Some(text.to_string());
         *self.hl.borrow_mut() = crate::query_ui::highlight_terms(text);
@@ -50,6 +55,9 @@ impl Browser {
         self.grid.set_model(Some(&self.dir_sel));
         self.dir_col.set_visible(false);
         self.git_col.set_visible(self.git.borrow().is_some());
+        if let Some((col, order)) = self.folder_sort.take() {
+            self.sort_quietly(col.as_ref(), order);
+        }
         if restore_scroll {
             let (l, g) = self.saved_scroll.get();
             let (ls, gs) = (self.list_scroll.clone(), self.grid_scroll.clone());
@@ -78,8 +86,13 @@ impl Browser {
         self.update_locbar();
         self.changed();
         let (sort, desc) = self.sort_key();
+        let prefer = if sort == Sort::Relevance {
+            self.query().map(|u| crate::picks::prefer(&u)).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let me = self.me.clone();
-        self.search.run(&q, sort, desc, move |r| {
+        self.search.run(&q, sort, desc, prefer, move |r| {
             let Some(b) = me.upgrade() else { return };
             if !b.is_searching() {
                 return;
@@ -139,14 +152,21 @@ impl Browser {
         });
     }
 
+    fn sort_quietly(&self, col: Option<&gtk::ColumnViewColumn>, order: gtk::SortType) {
+        self.sorting_quietly.set(true);
+        self.list.sort_by_column(col, order);
+        self.sorting_quietly.set(false);
+    }
+
+    /// The column clicked, or Best Match when none is.
     pub(super) fn sort_key(&self) -> (Sort, bool) {
         let Some(s) = self.list.sorter().and_downcast::<gtk::ColumnViewSorter>() else {
-            return (Sort::Name, false);
+            return (Sort::Relevance, false);
         };
         let key = s
             .primary_sort_column()
             .and_then(|c| self.cols.iter().find(|(k, _)| *k == c).map(|(_, s)| *s))
-            .unwrap_or(Sort::Name);
+            .unwrap_or(Sort::Relevance);
         (key, s.primary_sort_order() == gtk::SortType::Descending)
     }
 }

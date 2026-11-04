@@ -2,18 +2,22 @@
 
 mod archive;
 mod browser;
+mod calc;
 mod debinstall;
 mod filemanager1;
 mod fileops;
 mod git;
 mod icon;
+mod launcher;
 mod network;
 mod openwith;
 mod palette;
+mod picks;
 mod prefs;
 mod preview;
 mod props;
 mod query_ui;
+mod quick;
 mod rename;
 mod scripts;
 mod search;
@@ -152,7 +156,7 @@ fn parse_args() -> Args {
             "--width" => a.width = it.next().and_then(|w| w.parse().ok()),
             "--filemanager1" => a.filemanager1 = true,
             "-h" | "--help" => {
-                println!("usage: kestrel [PATH|URI]...");
+                println!("usage: kestrel [PATH|URI]...\n       kestrel --quick   the quick-search window (bind it to a shortcut in Preferences)");
                 std::process::exit(0);
             }
             _ => a.locs.push(Loc::Dir(gio::File::for_commandline_arg(&x))),
@@ -189,7 +193,7 @@ pub fn label_icon_buttons(root: &gtk::Widget) {
 }
 
 /// Render a widget to a PNG (used for headless checks under GDK_BACKEND=broadway).
-fn screenshot(w: &impl IsA<gtk::Widget>, path: &str) {
+pub fn screenshot(w: &impl IsA<gtk::Widget>, path: &str) {
     let p = gtk::WidgetPaintable::new(Some(w));
     let snap = gtk::Snapshot::new();
     p.snapshot(&snap, w.width() as f64, w.height() as f64);
@@ -203,6 +207,9 @@ fn screenshot(w: &impl IsA<gtk::Widget>, path: &str) {
 }
 
 fn main() -> glib::ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("--quick") {
+        return quick::main();
+    }
     let args = std::rc::Rc::new(parse_args());
     filemanager1::migrate_from_chimera();
     let fm1 = args.filemanager1;

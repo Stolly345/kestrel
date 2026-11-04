@@ -57,9 +57,21 @@ it happens, and pick out the one file you want the moment you ask for it.
 **Search**
 - Results while you type, across every local disk, USB drives included the moment they mount
 - Everything's query language: wildcards, `|` OR, `!` NOT, `<groups>`, `regex:`, `size:`, `dm:`, `ext:`, `dupe:`, `content:`…
+- **Best Match order**: the whole name beats its start, which beats the start of a word (`OwnerInvoice`, `old_report`), which beats anywhere. Your own folders (Desktop, Documents, Downloads, projects) rank up; caches, `node_modules`, build output and hidden folders rank down; this week's files edge ahead. Click a column header to sort by it instead
+- **Learns what you open**: a result you opened for a query moves up the next time you type it (or a shorter or longer version of it). Kept in `~/.config/kestrel/picks.json`, never sent anywhere
+- **Typing narrows**: when `repo` becomes `repor`, the service filters the last results instead of searching the whole disk again (5–7× faster per keystroke)
 - Type-aware: `.deb` lists .deb files first; `pdf`, `word`, `excel`, `powerpoint` also find files of that type (`budget excel` finds `Budget.xlsx`)
 - Scope switch (Everywhere / This folder / This folder only), filter chips, match highlighting, recent and saved searches, a syntax cheat sheet in the menu
 - `ks`: the same search on the command line, like Everything's `es.exe`
+
+**Quick Search** (`kestrel --quick`; turn on a shortcut in Preferences › Quick Search, Ctrl+Alt+Space by default)
+- A small search window over whatever you're doing, like a launcher: apps (by name, word or initials), files from the whole-disk index, and GNOME Settings pages (`bluetooth`, `dark`, `display`), in one Best Match list
+- Sums: `2^10 * 3`, `sqrt(2)/2`, `15% * 80`; Enter copies the answer
+- Web searches: `g rust lifetimes`, `ddg`, `yt`, `gh`, `wiki`, or your own in `settings.json` (`web_searches`)
+- System actions: `lock`, `sleep`, `log out`, `restart`, `shut down`, `bios` (restart into firmware setup); the ones that end your session ask for a second Enter
+- Before you type: pinned items (drag to reorder), then recent ones. Right-click (or Shift+F10) a result: Open With, Open File Location, Copy Path, Pin to Top, Forget
+- `?` lists the syntax and prefixes, each one Enter away. Ctrl+Enter shows a file in its folder, Ctrl+C copies its path, Tab searches inside a folder, Esc clears then hides; drag a file into another app
+- Stays in the background after the first use, so the shortcut opens it instantly
 
 **File manager**
 - A command bar like Windows Explorer's, as icons (hover for the name and shortcut): New, Open, Undo, Redo, Pin, Cut, Copy, Paste, Rename, Compress, Extract, Delete, View. Pin, Compress, Extract and View also show their names from the default window size up. The buttons grow or shrink with the window to stay on one row, and only a narrow window takes two. Select (☑) and Properties (ⓘ) sit at the start of the path bar
@@ -265,6 +277,8 @@ Shares without `x-kestrel` are never listed, so a big share behind a VPN isn't w
 | `tag:red`, `tag:taxes` | colour tags, by colour or by the name you gave it |
 | `content:"TODO"` | text inside files (slower; read permission checked first) |
 | `regex:^\d{4}-` · `case:Readme` · `path:src/main` | regular expression, case-sensitive, full path |
+
+Results come in Best Match order until you click a column header (`ks -s best` does the same on the command line).
 
 Open **Search Syntax** from the menu (or the command palette, Ctrl+Shift+P) for the full cheat sheet, or run `ks --syntax`.
 

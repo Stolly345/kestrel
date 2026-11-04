@@ -176,7 +176,7 @@ impl Default for SearchModel {
 impl SearchModel {
     /// Run a query on a worker thread; `done` gets the outcome unless a newer query superseded it.
     /// Results replace the model only on success, so a typo mid-typing keeps the last good results.
-    pub fn run(&self, q: &str, sort: Sort, desc: bool, done: impl FnOnce(Result<Outcome, SearchError>) + 'static) {
+    pub fn run(&self, q: &str, sort: Sort, desc: bool, prefer: Vec<(String, i32)>, done: impl FnOnce(Result<Outcome, SearchError>) + 'static) {
         let generation = self.imp().generation.get() + 1;
         self.imp().generation.set(generation);
         let req = Request {
@@ -186,6 +186,7 @@ impl SearchModel {
             offset: 0,
             limit: Some(PAGE as usize),
             more: false,
+            prefer,
             ..Default::default()
         };
         // each query gets its own connection, so it never queues behind a slow one (a bare `.`
@@ -267,6 +268,14 @@ impl SearchModel {
         }
         self.items_changed(0, old, 0);
     }
+}
+
+/// One request on a fresh connection (the quick-search window); None if the service is down.
+/// Blocking: call from a worker thread.
+pub fn ask_once(req: &Request) -> Option<Response> {
+    let mut c = Conn::open().ok()?;
+    c.w.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok()?;
+    c.ask(req).ok()
 }
 
 /// (entries, bytes) for a query, without fetching hits. Blocking: call from a worker thread.

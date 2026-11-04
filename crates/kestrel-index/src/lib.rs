@@ -90,6 +90,9 @@ pub enum Sort {
     Size,
     Mtime,
     Ext,
+    /// Best match first: how well the name fits the words typed, where the file lives (Desktop and
+    /// Documents up, caches and `node_modules` down), and what this user opened before.
+    Relevance,
 }
 
 /// Who is asking. uid 0 sees everything.
@@ -97,6 +100,15 @@ pub enum Sort {
 pub struct Cred {
     pub uid: u32,
     pub gids: Vec<u32>,
+}
+
+/// Extra inputs to a search beyond the query (see `Index::search_with`).
+#[derive(Default)]
+pub struct Extra {
+    /// Only these entries are candidates (the previous hits of a query this one narrows).
+    pub within: Option<Vec<u32>>,
+    /// Bonus points for entries, under Best Match: what this user opened for this query before.
+    pub prefer: Vec<(u32, i32)>,
 }
 
 thread_local! {
@@ -459,17 +471,42 @@ impl Index {
     /// them, unordered until `sort_rest`. A one-character query matches nearly everything, and
     /// fully sorting millions of hits to show 500 is what made typing `.` hang. Returns the hits
     /// and how many are sorted. Setting `cancel` makes it give up and return nothing.
-    pub fn search_top(&self, q: &Query, sort: Sort, desc: bool, cred: Option<&Cred>, top: Option<usize>, cancel: &std::sync::atomic::AtomicBool) -> (Vec<u32>, usize) {
+    pub fn search_top(
+        &self,
+        q: &Query,
+        sort: Sort,
+        desc: bool,
+        cred: Option<&Cred>,
+        top: Option<usize>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> (Vec<u32>, usize) {
+        self.search_with(q, sort, desc, cred, top, cancel, &Extra::default())
+    }
+
+    /// `search_top`, plus `within` (only look at these entries: the hits of a query this one
+    /// narrows) and `prefer` (entries the asker opened for this query before, with a bonus).
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_with(
+        &self,
+        q: &Query,
+        sort: Sort,
+        desc: bool,
+        cred: Option<&Cred>,
+        top: Option<usize>,
+        cancel: &std::sync::atomic::AtomicBool,
+        extra: &Extra,
+    ) -> (Vec<u32>, usize) {
         use std::sync::atomic::Ordering::Relaxed;
         let read_as = if q.reads { cred.cloned() } else { None };
         // under:/dir visits only that folder's entries (the Size column asks this per folder shown)
         let all: Vec<u32>;
-        let candidates: &[u32] = match q.under().map(|p| self.below(p)) {
-            Some(v) => {
+        let candidates: &[u32] = match (extra.within.as_deref(), q.under().map(|p| self.below(p))) {
+            (Some(w), _) => w,
+            (None, Some(v)) => {
                 all = v;
                 &all
             }
-            None => {
+            (None, None) => {
                 all = (0..self.len() as u32).collect();
                 &all
             }
@@ -500,6 +537,9 @@ impl Index {
         if cancel.load(Relaxed) {
             return (Vec::new(), 0);
         }
+        if sort == Sort::Relevance && q.dupe.is_none() {
+            return self.rank(hits, q, top, &extra.prefer);
+        }
         let cmp = self.order(q, sort, desc);
         match top {
             // ponytail: Path keys allocate per comparison, and dupes regroup everything; both keep the full sort
@@ -513,7 +553,10 @@ impl Index {
         if sort == Sort::Path {
             let boosted = |i: u32| self.boosted(q, i);
             let mut keyed: Vec<_> = hits.par_iter().map(|&i| (!boosted(i), self.lpath(i), i)).collect();
-            keyed.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then(if desc { (&b.1, b.2).cmp(&(&a.1, a.2)) } else { (&a.1, a.2).cmp(&(&b.1, b.2)) }));
+            keyed.par_sort_unstable_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then(if desc { (&b.1, b.2).cmp(&(&a.1, a.2)) } else { (&a.1, a.2).cmp(&(&b.1, b.2)) })
+            });
             hits = keyed.into_iter().map(|(_, _, i)| i).collect();
         } else {
             hits.par_sort_unstable_by(&cmp);
@@ -544,10 +587,147 @@ impl Index {
                 Sort::Mtime => self.entries[a as usize].mtime.cmp(&self.entries[b as usize].mtime),
                 Sort::Ext => self.ext(a).cmp(&self.ext(b)).then(self.lname(a).cmp(self.lname(b))),
                 Sort::Path => self.lpath(a).cmp(&self.lpath(b)),
+                // only the tail past the ranked head gets here (see `rank`): name fit alone
+                Sort::Relevance => {
+                    return self
+                        .name_score(q, b)
+                        .cmp(&self.name_score(q, a))
+                        .then(self.lname(a).cmp(self.lname(b)))
+                        .then(a.cmp(&b));
+                }
             }
             .then(a.cmp(&b));
             self.boosted(q, b).cmp(&self.boosted(q, a)).then(if desc { base.reverse() } else { base })
         }
+    }
+
+    /// Best Match, in two stages like Heimdall's: score every hit's name (cheap, no path), keep the
+    /// best few thousand, and only for those build the path and add where-it-lives and recency.
+    /// Returns the hits with that head in order; the tail stays unordered until `sort_rest`.
+    fn rank(&self, hits: Vec<u32>, q: &Query, top: Option<usize>, prefer: &[(u32, i32)]) -> (Vec<u32>, usize) {
+        let bonus: std::collections::HashMap<u32, i32> = prefer.iter().copied().collect();
+        let mut keyed: Vec<(i32, u32)> = hits
+            .par_iter()
+            .map(|&i| (self.name_score(q, i) + bonus.get(&i).copied().unwrap_or(0), i))
+            .collect();
+        let head = top.map_or(keyed.len(), |k| k.saturating_mul(4).max(2000)).min(keyed.len());
+        let by_score = |a: &(i32, u32), b: &(i32, u32)| b.0.cmp(&a.0).then(a.1.cmp(&b.1));
+        if head < keyed.len() {
+            keyed.select_nth_unstable_by(head, by_score);
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        keyed[..head].par_iter_mut().for_each(|(s, i)| *s += self.place_score(*i, now));
+        keyed[..head].par_sort_unstable_by(|a, b| by_score(a, b).then(self.lname(a.1).cmp(self.lname(b.1))));
+        (keyed.into_iter().map(|(_, i)| i).collect(), head)
+    }
+
+    /// How well a name fits the words typed: the whole name (or all but its extension) beats the
+    /// start of it, which beats the start of a word inside it, which beats anywhere. Shorter names
+    /// edge ahead; a typed type (`.deb`, `excel`) goes first.
+    fn name_score(&self, q: &Query, i: u32) -> i32 {
+        let (n, orig) = (self.lname(i), self.name(i));
+        let stem = match n.iter().rposition(|&b| b == b'.') {
+            Some(p) if p > 0 => &n[..p],
+            _ => n,
+        };
+        // a word starts after a separator, at a capital after a lowercase letter (OwnerInvoice),
+        // or where letters meet digits (invoice2026)
+        let word_start = |p: usize| {
+            let prev = n[p - 1];
+            !prev.is_ascii_alphanumeric()
+                || (orig.len() == n.len() && orig[p].is_ascii_uppercase() && orig[p - 1].is_ascii_lowercase())
+                || prev.is_ascii_digit() != n[p].is_ascii_digit()
+        };
+        // …and ends where the next one starts (or the name, or its extension, ends)
+        let word_end = |e: usize| e >= n.len() || word_start(e);
+        let mut s = 0;
+        for w in &q.words {
+            s += match memchr::memmem::find(n, w) {
+                None => 0,
+                Some(0) if n.len() == w.len() || stem == w.as_slice() => 120,
+                Some(0) if word_end(w.len()) => 90,
+                Some(0) => 70,
+                Some(p) if word_start(p) && word_end(p + w.len()) => 60,
+                Some(p) if word_start(p) => 45,
+                Some(_) => 15,
+            };
+        }
+        s -= n.len().min(80) as i32 / 4;
+        if self.entries[i as usize].kind == Kind::Dir {
+            s += 4;
+        }
+        if self.boosted(q, i) {
+            s += 300;
+        }
+        s
+    }
+
+    /// Where a file lives and how fresh it is: your own folders up, system folders, caches,
+    /// build output and hidden folders down, deep paths a little down, this week's files a little up.
+    fn place_score(&self, i: u32, now: i64) -> i32 {
+        const NOISE: &[&[u8]] = &[
+            b"/node_modules/",
+            b"/.cache/",
+            b"/.git/",
+            b"/target/",
+            b"/__pycache__/",
+            b"/.local/share/trash/",
+            b"/.cargo/registry/",
+            b"/.rustup/",
+            b"/site-packages/",
+            b"/.npm/",
+            b"/.var/app/",
+            b"/.mozilla/",
+            b"/.config/google-chrome/",
+            b"/.config/chromium/",
+            b"/snap/",
+            b"/.venv/",
+            b"/venv/",
+            b"/.gradle/",
+            b"/.m2/",
+            b"/vendor/",
+            b"/dist/",
+            b"/build/",
+            b"/.steam/",
+            b"/.wine/",
+            b"/timeshift/",
+            b"/flatpak/appstream/",
+            b"/third_party/",
+            b"/externals/",
+            b"/incremental/",
+        ];
+        const SYSTEM: &[&[u8]] = &[
+            b"/usr/", b"/var/", b"/opt/", b"/lib", b"/etc/", b"/sys/", b"/boot/", b"/srv/", b"/proc/", b"/bin/", b"/sbin/",
+        ];
+        const MINE: &[&[u8]] = &[b"desktop", b"documents", b"downloads", b"pictures", b"music", b"videos", b"projects", b"src"];
+        let p = self.lpath(i);
+        let mut s = 0;
+        let has = |needle: &[u8]| memchr::memmem::find(&p, needle).is_some();
+        let noise = NOISE.iter().any(|n| has(n));
+        if noise {
+            s -= 100;
+        } else if has(b"/.") {
+            s -= 40; // inside a hidden folder (or a hidden file)
+        }
+        if SYSTEM.iter().any(|d| p.starts_with(d)) {
+            s -= 25;
+        }
+        // /home/<user>/<top>/…: your own top-level folders
+        let home_rest = p.strip_prefix(b"/home/").and_then(|r| r.iter().position(|&b| b == b'/').map(|k| &r[k + 1..]));
+        if let Some(rest) = home_rest.filter(|_| !noise) {
+            let top = rest.split(|&b| b == b'/').next().unwrap_or_default();
+            s += if rest.len() > top.len() && MINE.contains(&top) { 30 } else { 12 };
+        }
+        s -= (p.iter().filter(|&&b| b == b'/').count() as i32 * 2).min(30);
+        let age = now - self.entries[i as usize].mtime;
+        if (0..7 * 86400).contains(&age) {
+            s += 12;
+        } else if (0..30 * 86400).contains(&age) {
+            s += 6;
+        }
+        s
     }
 
     /// Keep hits whose key another hit shares; stable-sort so each group sits together.

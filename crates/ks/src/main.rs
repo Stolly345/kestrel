@@ -6,8 +6,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::exit;
 
-const USAGE: &str = "usage: ks [-n N] [-s name|path|size|mtime|ext] [-r] [-l] [-0] [--json] [--scope DIR] [--count] QUERY...
-  -n N     at most N results     -s KEY  sort (default name)   -r  reverse
+const USAGE: &str = "usage: ks [-n N] [-s name|path|size|mtime|ext|best] [-r] [-l] [-0] [--json] [--scope DIR] [--count] QUERY...
+  -n N     at most N results     -s KEY  sort (default name; best = best match)   -r  reverse
   -l       show size and date    -0      NUL-separated paths   --json  raw response
   --scope DIR   only below DIR (. = here)                     --count  print the number of matches
 query syntax: see `ks --syntax`";
@@ -44,7 +44,8 @@ fn main() {
                     Some("size") => Sort::Size,
                     Some("mtime" | "date") => Sort::Mtime,
                     Some("ext") => Sort::Ext,
-                    _ => fail("-s takes name|path|size|mtime|ext"),
+                    Some("best" | "relevance") => Sort::Relevance,
+                    _ => fail("-s takes name|path|size|mtime|ext|best"),
                 }
             }
             "-r" => req.desc = true,
