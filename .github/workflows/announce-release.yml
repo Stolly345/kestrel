@@ -256,11 +256,14 @@ jobs:
               [f"{r['app']} {r['version']} is out. What's new:", ""]
               + [f"- {h}" for h in (r.get("bullets") or r["highlights"])]
               + ([""] + [f"Packages: {' · '.join(r['pkgs'])}. Release notes and downloads: {r['url']}"] if r["pkgs"] else [""] + [r["url"]]))
-          q = urllib.parse.urlencode({"url": r["url"], "title": title})
+          # the repo page, not the release page: only the repo page shows the custom social preview
+          # (docs/social-preview.png); release pages get a card GitHub draws. The release link is in
+          # the suggested comment.
+          q = urllib.parse.urlencode({"url": f"https://github.com/{os.environ['REPO']}", "title": title})
           subs = os.environ["SUBREDDITS"].replace(",", " ").split()
           links = [f"- [ ] [r/{s.removeprefix('r/')}](https://www.reddit.com/r/{s.removeprefix('r/')}/submit?{q})" for s in subs]
           body = "\n".join([
-              f"{r['app']} {r['version']} is released. Each link opens Reddit's new-post page with the title and link filled in; check it, then Post. Tick each one off, and close this issue when done.",
+              f"{r['app']} {r['version']} is released. Each link opens Reddit's new-post page with the title and the repo link filled in (the repo page shows the Kestrel card); check it, then Post. Tick each one off, and close this issue when done.",
               "",
               "Read each subreddit's self-promotion rules first (several allow only some posts by the author of a project, or ask for a comment explaining it).",
               "",
