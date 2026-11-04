@@ -364,6 +364,7 @@ defined in the Apache-2.0 license, is dual licensed as above, without any additi
 
 Licences of the Rust crates and the C libgit2 compiled into Kestrel are collected in
 [packaging/THIRD-PARTY-LICENSES.txt](packaging/THIRD-PARTY-LICENSES.txt).
+**Font:** [Geologica](https://github.com/monokromskriftforlag/geologisk) (SIL Open Font License 1.1, installed as `/usr/share/doc/kestrel/Geologica-OFL.txt`).
 **Bundled:** [7-Zip](https://www.7-zip.org/) by Igor Pavlov (GNU LGPL, with the unRAR licence
 restriction for RAR code; see [packaging/7zip/License.txt](packaging/7zip/License.txt)).
 **Test samples:** files from [libarchive](https://github.com/libarchive/libarchive)

@@ -695,3 +695,8 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   grows (5–7× faster per keystroke, same hits). Quick Search (`kestrel --quick`, shortcut in Preferences, off by
   default): apps, files, GNOME Settings pages, calculator, web prefixes, system actions, `?` tips, pinned and recent
   items. Details in PLAN.md.
+- **v0.9.40 (2026-11-03): a look of its own** (Hallmark restyle, theme Vantage). Dark: blue-black ground, steel
+  ink, hairlines, no shadows; light: the same hue re-derived. One lime signal for selection, focus, the primary
+  action, switches and drive usage, replacing the distro accent. Geologica (OFL) ships with the package. Every
+  screen keeps its layout. Status text drops the " · " joins ("3 results, 39 bytes, found in 5 ms"); quick search
+  gets Pinned/Recent headings. All CSS in `style.css` + `style-dark.css`.
