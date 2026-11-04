@@ -736,3 +736,6 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   Uninstall; Run Without Installing for a first look. Recommends squashfs-tools (deb/rpm/Arch). Tests: unit
   (tree/icon resolution incl. symlink escapes, rpm/deb names, fit, a built .deb, a fake AppImage read → install →
   update → uninstall) and feature tests (deb flow, AppImage flow + update + uninstall, .rpm on Ubuntu).
+- **v0.9.41 (2026-11-04): your accent colour again, plus a Kestrel Lime option.** On top of the accent fix above:
+  Preferences › Appearance › Accent colour (Follow System, the default, or Kestrel Lime). Lime is opt-in through
+  `style-accent.css`, loaded by `main::apply_accent`; it switches live. Quick search re-reads it when it opens.
