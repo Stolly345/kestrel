@@ -10,7 +10,7 @@
 
 ![Kestrel social preview](docs/social-preview.png)
 
-*GitHub social preview (1280×640), made by `scripts/social-preview.py` from the icon and `docs/screenshots/kestrel.png`; uploaded by hand in Settings → General → Social preview.*
+*GitHub social preview (1280×640), made by `scripts/social-preview.py` from the icon and `docs/screenshots/kestrel-dark.png` (dark mode, Kestrel Lime); it says only the name, "Find any file the moment you type." and one line about the app (no URL, version or tech stack, so it doesn't go stale); uploaded by hand in Settings → General → Social preview.*
 
 ---
 

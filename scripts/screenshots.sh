@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # README screenshots: the real app on a made-up home folder ("maya", shown as ~/… so no temp path
-# appears), with its own search index. Writes docs/screenshots/{kestrel,search,preview,select}.png.
+# appears), with its own search index. Writes docs/screenshots/{kestrel,search,preview,select,kestrel-dark}.png.
 #
 #   scripts/screenshots.sh
 #
@@ -101,7 +101,7 @@ out=$root/docs/screenshots
 mkdir -p "$out"
 R=$W/run
 mkdir -p "$R" && chmod 700 "$R"
-export HOME=$H XDG_RUNTIME_DIR=$R GDK_BACKEND=x11 GDK_DEBUG=no-portals KESTREL_SOCK=$R/kestrel.sock
+export GIO_USE_VOLUME_MONITOR=unix HOME=$H XDG_RUNTIME_DIR=$R GDK_BACKEND=x11 GDK_DEBUG=no-portals KESTREL_SOCK=$R/kestrel.sock
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 KESTREL_ROOT=$H KESTREL_STATE=$R/index.bin "$root/target/release/kestrel-indexd" --no-watch 2>"$R/indexd.log" &
 IXD=$!
@@ -121,6 +121,9 @@ shot kestrel --width 1400 --search aurora --select "Invoice 2026-10 Aurora Studi
 shot search --search .iso
 shot preview "$H/Documents" --select "Kestrel Field Guide.pdf" --action preview
 shot select "$H/Documents" --width 1400 --action select-mode --select "Invoice 2026-09 Aurora Studio.pdf" --select "Invoice 2026-10 Aurora Studio.pdf"
+# the social preview card's shot (scripts/social-preview.py): dark mode, Kestrel Lime accent
+mkdir -p "$H/.config/kestrel" && printf '{"accent":"kestrel"}' >"$H/.config/kestrel/settings.json"
+ADW_DEBUG_COLOR_SCHEME=prefer-dark shot kestrel-dark --width 1400 --search aurora --select "Invoice 2026-10 Aurora Studio.pdf" --action preview
 kill $IXD 2>/dev/null
 pkill -f "wsdd .*--listen $R/" 2>/dev/null || true
 echo "screenshots in docs/screenshots/"
