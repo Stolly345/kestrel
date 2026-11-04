@@ -241,7 +241,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-          SUBREDDITS: ${{ vars.REDDIT_SUBREDDITS || 'linux rust opensource gnome fedora linuxapps' }}
+          SUBREDDITS: ${{ vars.REDDIT_SUBREDDITS || 'linux rust opensource gnome' }}
         run: |
           python3 - <<'EOF'
           import json, os, subprocess, urllib.parse
