@@ -688,3 +688,10 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   got their own dock icon. The service now uses `dev.kestrel.Kestrel` too. No clash: the normal launch is
   NON_UNIQUE and never takes that bus name, and `org.freedesktop.FileManager1` already keeps the service to one
   copy. Tested over D-Bus (ShowFolders ~/Downloads) and by Alex from the browser on the installed .deb.
+- **v0.9.39 (2026-11-03): Heimdall-inspired search.** Best Match (`Sort::Relevance`) is the default order for search
+  results until a column header is clicked: name fit first, then where the file lives (own folders up; caches,
+  `node_modules`, build output, hidden and system folders down) and how fresh it is. What you open for a query ranks
+  first next time (`picks.json` → `Request.prefer`). The service filters the last result when a plain query only
+  grows (5–7× faster per keystroke, same hits). Quick Search (`kestrel --quick`, shortcut in Preferences, off by
+  default): apps, files, GNOME Settings pages, calculator, web prefixes, system actions, `?` tips, pinned and recent
+  items. Details in PLAN.md.
