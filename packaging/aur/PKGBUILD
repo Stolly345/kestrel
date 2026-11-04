@@ -2,7 +2,7 @@
 # Repackages the release .deb (the same binaries as the .deb/.rpm; built on Ubuntu 26.04).
 # New release: set pkgver, sha256sum of the uploaded .deb, then `makepkg --printsrcinfo > .SRCINFO`.
 pkgname=kestrel-bin
-pkgver=0.9.38
+pkgver=0.9.39
 pkgrel=1
 pkgdesc="File manager with instant whole-disk search (Everything + Files for Linux)"
 arch=('x86_64')
@@ -26,7 +26,7 @@ install=kestrel-bin.install
 # prebuilt, already stripped release binaries
 options=('!debug' '!strip')
 source=("https://github.com/Stolly345/kestrel/releases/download/v${pkgver}/kestrel_${pkgver}-1_amd64.deb")
-sha256sums=('43b347efd89795bdc4662e215536359f076b5c41d8d5056a2640e2f89836c485')
+sha256sums=('65eb8a8044aaf3fb3a10cf2150721c7deb11c6f6af7c7bca7f161d3aaef11d85')
 
 package() {
     bsdtar -xf data.tar.* -C "$pkgdir"
