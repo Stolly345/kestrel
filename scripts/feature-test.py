@@ -12,7 +12,7 @@ root and are in scripts/smoke-live.sh. Failed tests leave a screenshot in target
 
 Needs: xvfb, python3-xlib, gir1.2-atspi-2.0 (all in Ubuntu by default except xvfb).
 """
-import hashlib, os, shutil, subprocess, sys, tempfile, time, traceback, zlib, struct
+import glob, hashlib, os, shutil, subprocess, sys, tempfile, time, traceback, zlib, struct
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "target", "feature-test")
@@ -1202,6 +1202,12 @@ def _():
     eventually(lambda: names() == ["main.rs"] and "1 selected" in status() and "result" not in status(), "src with main.rs selected")
 
 
+def shot(name):
+    """A screenshot of the installer for review, kept in target/feature-test/."""
+    time.sleep(0.6)
+    screenshot(os.path.join(OUT, f"install-{name}.png"))
+
+
 @test("install: double-clicking a .deb opens the installer; it installs and puts the icon on the Desktop")
 def _():
     root = os.path.join(HOME, "debroot")
@@ -1226,9 +1232,15 @@ def _():
     finally:
         os.environ["PATH"] = path
     click(row("ft.deb"), double=True)
-    wait(lambda: all_(None, "Install ft-pkg?"), "the installer")
+    wait(lambda: all_("label", "ft-pkg") and all_("button", "Next"), "the installer", 10)
+    assert all_("label", "everyone on this computer"), "who it installs for"
+    shot("deb-1-intro")
+    press_button("Next")
+    wait(lambda: all_("button", "Install"), "where it goes")
+    shot("deb-2-options")
     press_button("Install")
-    wait(lambda: all_(None, "ft-pkg is installed"), "installed", 10)
+    wait(lambda: all_("label", "ft-pkg is installed"), "installed", 10)
+    shot("deb-4-done")
     args = open(os.path.join(HOME, "pkexec-args")).read()
     assert "apt-get install -y" in args and args.strip().endswith("ft.deb"), args
     icon = os.path.join(HOME, "Desktop", launcher)
@@ -1238,9 +1250,89 @@ def _():
     press_button("Close")
     # Browse Contents still looks inside
     click(row("ft.deb"), double=True)
-    wait(lambda: all_(None, "Install ft-pkg?"), "the installer")
+    wait(lambda: all_("button", "Browse Contents"), "the installer", 10)
     press_button("Browse Contents")
     eventually(lambda: "debian-binary" in names(), "the package's contents", 10)
+
+
+def fake_appimage(dest, name="FT App", version="2.1.0"):
+    """An AppImage-shaped file: a minimal ELF header saying "type-2 AppImage", then a squashfs
+    with a launcher, an icon and a chrome-sandbox (so it reads as Electron). It can't run."""
+    tree = os.path.join(HOME, "appdir")
+    shutil.rmtree(tree, ignore_errors=True)
+    os.makedirs(os.path.join(tree, "usr/share/icons/hicolor/256x256/apps"))
+    open(os.path.join(tree, "ftapp.desktop"), "w").write(
+        f"[Desktop Entry]\nType=Application\nName={name}\nComment=Takes notes\nIcon=ftapp\nExec=AppRun %U\n"
+        f"Categories=Office;\nX-AppImage-Version={version}\n")
+    open(os.path.join(tree, "AppRun"), "w").write("#!/bin/sh\n")
+    open(os.path.join(tree, "chrome-sandbox"), "w").write("x")
+    shutil.copy(os.path.join(ROOT, "packaging/icon/bird.png"),
+                os.path.join(tree, "usr/share/icons/hicolor/256x256/apps/ftapp.png"))
+    sq = os.path.join(HOME, "fs.sqfs")
+    subprocess.run(["mksquashfs", tree, sq, "-noappend", "-quiet", "-no-progress"], check=True, capture_output=True)
+    hdr = bytearray(64)
+    hdr[0:4] = b"\x7fELF"; hdr[4] = 2; hdr[5] = 1; hdr[8:11] = b"AI\x02"
+    hdr[0x12:0x14] = struct.pack("<H", 0x3E)
+    hdr[0x28:0x30] = struct.pack("<Q", 64); hdr[0x3A:0x3C] = struct.pack("<H", 64)
+    open(dest, "wb").write(bytes(hdr) + open(sq, "rb").read())
+
+
+@test("install: an AppImage installs for you: ~/Applications, a launcher with its icon, a Desktop icon")
+def _():
+    if not shutil.which("mksquashfs") or not shutil.which("unsquashfs"):
+        raise Skip("needs squashfs-tools")
+    img = os.path.join(D, "FT_App-2.1.0-x86_64.AppImage")
+    fake_appimage(img)
+    start(D)
+    click(row("FT_App-2.1.0-x86_64.AppImage"), double=True)
+    wait(lambda: all_("label", "FT App") and all_("button", "Next"), "the installer", 10)
+    assert all_("label", "only you") and all_("label", "AppImage"), "kind and who it's for"
+    shot("appimage-1-intro")
+    press_button("Next")
+    wait(lambda: all_("button", "Install"), "where it goes")
+    assert all_(None, contains="~/Applications/FT-App.AppImage"), "where it goes"
+    shot("appimage-2-options")
+    press_button("Install")
+    wait(lambda: all_("label", "FT App is installed"), "installed", 10)
+    shot("appimage-4-done")
+    dest = os.path.join(HOME, "Applications/FT-App.AppImage")
+    assert os.access(dest, os.X_OK), "the AppImage in ~/Applications, executable"
+    assert not os.path.exists(img), "the download was moved"
+    launcher = os.path.join(HOME, ".local/share/applications/ftapp.desktop")
+    text = open(launcher).read()
+    assert "Icon=kestrel-ftapp" in text and "X-Kestrel-AppImage=" + dest in text, text
+    assert "CHROME_DESKTOP=ftapp.desktop" in text and "StartupWMClass=ftapp" in text, text
+    assert os.path.isfile(os.path.join(HOME, ".local/share/icons/hicolor/256x256/apps/kestrel-ftapp.png")), "the icon"
+    on_desk = os.path.join(HOME, "Desktop/ftapp.desktop")
+    assert os.access(on_desk, os.X_OK), "Desktop icon"
+    press_button("Close")
+    # opening a newer one offers the update, and Uninstall
+    img2 = os.path.join(D, "FT_App-2.2.0-x86_64.AppImage")
+    fake_appimage(img2, version="2.2.0")
+    time.sleep(1)
+    click(row("FT_App-2.2.0-x86_64.AppImage"), double=True)
+    wait(lambda: all_("button", "Uninstall 2.1.0"), "the update screen", 10)
+    assert all_("label", "2.1.0 is installed"), "what's installed"
+    shot("appimage-5-update")
+    press_button("Uninstall 2.1.0")
+    press_button("Uninstall")
+    eventually(lambda: not os.path.exists(dest) and not os.path.exists(launcher) and not os.path.exists(on_desk), "uninstalled")
+
+
+@test("install: an .rpm on Ubuntu explains it's for Fedora and offers Browse Contents")
+def _():
+    if not shutil.which("apt-get"):
+        raise Skip("for apt systems")
+    rpms = sorted(glob.glob(os.path.join(ROOT, "target/generate-rpm/*.rpm")))
+    if not rpms:
+        raise Skip("no .rpm built (cargo generate-rpm -p crates/kestrel)")
+    shutil.copy(rpms[-1], os.path.join(D, "app.x86_64.rpm"))
+    start(D)
+    click(row("app.x86_64.rpm"), double=True)
+    wait(lambda: all_(None, contains="made for Fedora and openSUSE"), "the explanation", 10)
+    assert all_("button", "Browse Contents") and not all_("button", "Next"), "no way to install it"
+    shot("rpm-wrong-family")
+    press_button("Close")
 
 
 @test("default file manager: FileManager1.ShowItems opens and selects")

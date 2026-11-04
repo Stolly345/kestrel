@@ -16,6 +16,7 @@ optdepends=('gst-plugins-good: more audio/video formats in the preview'
             'gst-libav: more audio/video formats in the preview'
             'gvfs-smb: Windows shares on the Network page'
             'cifs-utils: Index… on the Network page (search a NAS)'
+            'squashfs-tools: read AppImages without running them (Install App)'
             'xdg-terminal-exec: Open in Terminal uses your chosen terminal'
             'poppler: PDF page previews'
             'libreoffice-fresh: previews of Office documents')

@@ -195,6 +195,7 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
 | F13 | Open With with "Always use for this file type", and Set Default App, so default apps can be changed without leaving Kestrel | P1 (done 0.9.29) |
 | F14 | Install a .deb by double-click: wizard (info, installed version, Desktop icon switch), apt via pkexec, Open when done; Browse Archive stays on the right-click menu | P1 (done 0.9.34) |
 | F15 | Open File Location on search results | P1 (done 0.9.34) |
+| F16 | Install apps from a .deb, .rpm or AppImage by double-click: a click-through wizard (what it is → where it goes → installing → done) with the app's own icon throughout, ending in a launcher with the right icon; AppImages without a password | P1 (Unreleased) |
 
 ### 7.5 CLI
 - `ks` mirrors Everything's `es.exe`. It exists; P1 is to add `--scope DIR` and `--count`.
@@ -711,3 +712,27 @@ AND, OR (`|`), NOT (`!`), quotes, wildcards, `regex:`, `case:`, `path:`, `file:`
   `--accent-bg-color` / `--accent-fg-color` / `--accent-color`, which Kestrel no longer overrides (0.9.40 replaced
   them with a fixed lime). Selection, focus ring, search caret, primary buttons, switches and drive bars take the
   system colour; the Vantage ground, ink and Geologica stay.
+- **Unreleased (2026-11-04): Install App for .deb, .rpm and AppImage** (Alex; F16; mockup approved first, see the
+  "Kestrel App Installer" artifact). `debinstall.rs` became `install/` (`mod.rs` shared model, `pkg.rs`, `appimage.rs`,
+  `wizard.rs`). One AdwDialog, four pages: *what it is* (icon 96 px, real name from the package's own launcher,
+  version, size, kind, download site from the `user.xdg.origin.url` xattr, status, apt's dry-run count of extra
+  packages, who it installs for, a trust warning for AppImages) → *where it goes* (launcher preview in the apps and
+  on the Desktop, Desktop icon switch, AppImage: move or copy the download) → *installing* (checklist, progress,
+  Details log) → *done* (Open, Show in Folder, notes). Nothing is run to read it: packages unpack only their
+  launchers and icons (`dpkg-deb --fsys-tarfile | tar`, `rpm2cpio | cpio`, or bsdtar) and AppImages their squashfs
+  (`unsquashfs -o OFFSET`, offset from the runtime's ELF section table; fallback: the runtime's own
+  `--appimage-extract` inside the sandbox), all in the archive bubblewrap sandbox; icon files must resolve inside the
+  unpacked tree. Packages: `pkexec apt-get install` / `dnf install` / `zypper install --allow-unsigned-rpm`
+  (reinstall when the same version is there); the launchers come from the package's file list, including /opt
+  apps whose postinst copies them. Wrong family (.rpm on apt, .deb on dnf) or processor: says what it's made for
+  and what to look for, offers Browse Contents; no `alien` (Alex). AppImages (Alex: ~/Applications): file
+  `~/Applications/<Name>.AppImage` (no version, so an update replaces it), every hicolor size of its icon as
+  `kestrel-<id>` in ~/.local/share/icons/hicolor (a stale icon-theme.cache is rebuilt), launcher
+  `~/.local/share/applications/<id>.desktop` named after the app's own (electron-builder's `appimagekit-` dropped)
+  so the window's app id matches; Electron apps also get `CHROME_DESKTOP=<id>.desktop`, which they name their window
+  after. `--no-sandbox` is added only when it's Electron, its AppRun doesn't already handle it (electron-builder's
+  does, e.g. Joplin) and `unshare -Ur` fails (Ubuntu's userns restriction) (Alex chose automatic). A runtime that
+  can't mount (no libfuse2 / fusermount3) gets `APPIMAGE_EXTRACT_AND_RUN=1`. Opening a newer one offers Update and
+  Uninstall; Run Without Installing for a first look. Recommends squashfs-tools (deb/rpm/Arch). Tests: unit
+  (tree/icon resolution incl. symlink escapes, rpm/deb names, fit, a built .deb, a fake AppImage read → install →
+  update → uninstall) and feature tests (deb flow, AppImage flow + update + uninstall, .rpm on Ubuntu).

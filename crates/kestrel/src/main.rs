@@ -3,11 +3,11 @@
 mod archive;
 mod browser;
 mod calc;
-mod debinstall;
 mod filemanager1;
 mod fileops;
 mod git;
 mod icon;
+mod install;
 mod launcher;
 mod network;
 mod openwith;

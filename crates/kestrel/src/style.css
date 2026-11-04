@@ -186,3 +186,30 @@ window.quick { background: none; }
 .quick-hint { font-size: 0.85em; color: var(--color-muted); padding: 6px 14px; border-top: var(--rule-hair) solid var(--color-rule); }
 .quick-key { color: var(--color-ink-2); }
 .quick-confirm { color: var(--color-warning); }
+
+/* ── the installer (install/wizard.rs): the app's icon first, one accent action per page ── */
+.installer-dots { margin-top: 2px; margin-bottom: 4px; }
+.installer-dot { min-width: 6px; min-height: 6px; border-radius: 3px; background-color: var(--color-rule-2); }
+.installer-dot.on { min-width: 18px; background-color: var(--accent-bg-color); }
+.installer-icon { -gtk-icon-shadow: 0 6px 14px var(--color-shade); }
+.installer-name { margin-top: 6px; }
+.installer-sub { color: var(--color-muted); font-size: 0.93em; font-feature-settings: "tnum"; }
+.installer-desc { color: var(--color-ink-2); }
+.installer-props label { font-size: 0.95em; }
+.installer-pill { padding: 1px 8px; border-radius: var(--radius-pill); font-size: 0.82em; background-color: var(--color-paper-3); color: var(--color-ink-2); }
+.installer-pill.go { background-color: color-mix(in srgb, var(--accent-bg-color) 22%, transparent); color: var(--accent-color); }
+.installer-pill.no { background-color: color-mix(in srgb, var(--color-warning) 18%, transparent); color: var(--color-warning); }
+.installer-note { padding: 10px 12px; border-radius: 8px; font-size: 0.92em; color: var(--color-ink-2); background-color: var(--color-paper-2); border: var(--rule-hair) solid var(--color-rule); }
+.installer-note.warn { background-color: color-mix(in srgb, var(--color-warning) 10%, var(--color-paper)); border-color: color-mix(in srgb, var(--color-warning) 35%, var(--color-paper)); }
+.installer-note .installer-note-icon { color: var(--color-muted); }
+.installer-note.warn .installer-note-icon { color: var(--color-warning); }
+.installer-preview { padding: 14px; border-radius: 8px; background-color: var(--color-paper-2); border: var(--rule-hair) dashed var(--color-rule-2); }
+.installer-tile label { color: var(--color-ink-2); }
+.installer-button { min-height: 40px; border-radius: 8px; font-weight: 600; }
+.installer-button.flat { min-height: 32px; font-weight: 500; color: var(--color-ink-2); }
+.installer-progress trough, .installer-progress progress { min-height: 6px; border-radius: 3px; }
+.installer-check-ok { color: var(--accent-color); font-weight: 700; }
+.installer-check-todo { color: var(--color-rule-2); }
+.installer-check-fail { color: var(--color-error); font-weight: 700; }
+.installer-log { font-size: 0.8em; padding: 6px 8px; }
+.installer-badge { min-width: 30px; min-height: 30px; border-radius: 15px; margin: 0 -4px -2px 0; background-color: var(--accent-bg-color); color: var(--accent-fg-color); font-weight: 700; box-shadow: 0 0 0 3px var(--dialog-bg-color); }

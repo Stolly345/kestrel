@@ -1569,9 +1569,10 @@ impl Browser {
             }
         } else if let Some(f) = info_file(info) {
             // GVfs' archive backend is in gvfs-backends (Recommends); without it, open in an app
-            // the wizard runs dpkg-deb and apt-get: on Fedora etc. a .deb just opens like any file
-            if f.is_native() && crate::debinstall::is_deb(&info.name().to_string_lossy()) && glib::find_program_in_path("apt-get").is_some() {
-                crate::debinstall::show(&self.ops, &f);
+            // .deb, .rpm and AppImages open the installer (which also explains a package that
+            // can't install here, such as an .rpm on Ubuntu)
+            if f.is_native() && crate::install::handles(&info.name().to_string_lossy()) {
+                crate::install::show(&self.ops, &f);
             } else if f.is_native() && crate::archive::browse_on_open(&info.name().to_string_lossy()) && std::path::Path::new("/usr/libexec/gvfsd-archive").exists() {
                 self.go(Loc::Dir(crate::archive::archive_root(&f)));
                 self.focus_view();

@@ -34,7 +34,7 @@ priority = "optional"
 depends = "$auto, bubblewrap, tar, gzip, xz-utils, bzip2, zstd, gvfs, xdg-utils, pkexec, curl"
 conflicts = "chimera"
 replaces = "chimera"
-recommends = "cifs-utils, gstreamer1.0-libav, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
+recommends = "cifs-utils, squashfs-tools, gstreamer1.0-libav, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, ncompress, gvfs-backends, xdg-terminal-exec, poppler-utils, libreoffice-writer, libreoffice-calc, libreoffice-impress"
 conf-files = ["/etc/kestrel/excludes"]
 maintainer-scripts = "../../packaging/debian/"
 assets = [
@@ -106,6 +106,7 @@ curl = "*"
 # weak: dnf installs them by default and skips any a distro doesn't have
 [package.metadata.generate-rpm.recommends]
 cifs-utils = "*"
+squashfs-tools = "*"
 gstreamer1-plugins-good = "*"
 gstreamer1-plugins-bad-free = "*"
 gstreamer1-plugins-ugly-free = "*"

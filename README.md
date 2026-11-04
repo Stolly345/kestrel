@@ -82,7 +82,7 @@ it happens, and pick out the one file you want the moment you ask for it.
 - A Network page like GNOME Files': connected shares, servers you've used (shared with Files), what's on your network, and Connect to Server
 - New ▸ Folder, Shortcut, Text, Markdown, Word, Excel, PowerPoint or PDF: real blank documents, opened straight away in your default app for that type (change those with Open ▾ › Set Default App…)
 - Open With lists the apps for a file's type, with *Always use for this file type*; Set Default App changes the default without opening anything. Saved where GNOME Files saves it, so every app agrees
-- Double-click a `.deb` to install it: a wizard shows what it is and whether it's installed, apt fetches its dependencies, and the app's icon lands on your Desktop (optional). Right-click › Browse Archive still looks inside
+- **Install apps by double-click**: a `.deb`, an `.rpm` or an AppImage opens a click-through installer (Next, Install, Open) that shows the app's own icon and name before anything is installed, and ends with a launcher in your apps and, if you like, on the Desktop. Packages install through apt, dnf or zypper with their dependencies; an AppImage needs no password: it goes to `~/Applications` with its icons, updates in place when you open a newer one, and can be uninstalled from the same screen. An `.rpm` on Ubuntu (or a `.deb` on Fedora) says what it's for instead. Right-click › Browse Archive still looks inside
 - Open File Location on a search result: its folder, with it selected
 - Tells you when a new version is out: once a day it asks GitHub for the latest release (nothing else is sent; turn it off in Preferences › System › Check for updates)
 - Copy, move, rename, undo and redo; Paste as Link (symlinks); clipboard compatible with GNOME Files; drag and drop
@@ -208,6 +208,7 @@ cargo generate-rpm -p crates/kestrel         # -> target/generate-rpm/kestrel-*.
 | Package | For |
 |---|---|
 | gvfs-backends | browsing inside archives; network places (SFTP, SMB…) |
+| squashfs-tools | reading an AppImage's name and icon without running it |
 | poppler-utils | PDF previews |
 | libreoffice-writer, -calc, -impress | Word, Excel, PowerPoint and OpenDocument previews |
 | gstreamer1.0-libav, -plugins-good, -bad, -ugly | playing every common audio and video codec |
@@ -319,12 +320,12 @@ KESTREL_7ZZ=$PWD/packaging/7zip/7zz cargo test --workspace
   page, and saves every screen to `target/ui-check/`.
 - **`scripts/feature-test.py`** uses the app the way a person does: it clicks, types and presses
   shortcuts through the accessibility layer under a virtual display, then checks the result on disk
-  and on screen. 63 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
+  and on screen. 65 tests cover navigation, tabs, windows, session restore, views, bookmarks, dual pane,
   copy/move/rename/undo/redo/trash/restore/delete and name clashes, New documents opening in their apps, Open With and Set Default App, Paste as Link, Select
   mode and its checkboxes, batch rename, tags, search (typing, type
   ranking, scopes, tags, content, saved searches, the query language), previews, properties and
   checksums, the palette, preferences, the terminal, Nautilus scripts, git status, opening files,
-  Show in Folder and Open File Location, and installing a .deb by double-click. Failures leave a screenshot and a dump of what was on screen in
+  Show in Folder and Open File Location, and installing a .deb or an AppImage by double-click (and an .rpm on Ubuntu being explained). Failures leave a screenshot and a dump of what was on screen in
   `target/feature-test/`. Needs `xvfb` and `python3-xlib`.
 - **`scripts/screenshots.sh`** regenerates the screenshots above from the real app and a made-up
   home folder.
