@@ -1,0 +1,6 @@
+/* Hallmark · theme: Vantage · Kestrel lime, when Preferences › Accent colour says so (main.rs apply_accent).
+ * Without this file Kestrel's accent tokens follow libadwaita's, which is the accent chosen in GNOME
+ * Settings. The lime values are tokens in style.css (light) and style-dark.css (dark). */
+:root {
+  --accent-bg-color: var(--color-lime); --accent-fg-color: var(--color-lime-ink); --accent-color: var(--color-lime-text);
+}

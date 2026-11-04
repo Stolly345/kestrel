@@ -39,6 +39,8 @@ fn default_columns() -> Vec<ColumnPref> {
 pub struct Settings {
     /// "system" | "light" | "dark"
     pub color_scheme: String,
+    /// Accent colour: "system" (the one chosen in GNOME Settings) | "kestrel" (Kestrel lime)
+    pub accent: String,
     /// View for new tabs: "list" | "grid" | "columns"
     pub default_view: String,
     pub show_hidden: bool,
@@ -75,6 +77,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             color_scheme: "system".into(),
+            accent: "system".into(),
             default_view: "list".into(),
             show_hidden: false,
             restore_session: true,
@@ -469,6 +472,18 @@ pub fn show(parent: &adw::ApplicationWindow, on_change: impl Fn() + 'static, on_
     );
     scheme.connect_selected_notify(move |r| update(|s| s.color_scheme = schemes[r.selected().min(2) as usize].into()));
     look.add(&scheme);
+    let accents = ["system", "kestrel"];
+    let accent = combo(
+        "Accent colour",
+        "For selection, focus and the main buttons",
+        &["Follow System", "Kestrel Lime"],
+        accents.iter().position(|x| *x == s.accent).unwrap_or(0) as u32,
+    );
+    accent.connect_selected_notify(move |r| {
+        update(|s| s.accent = accents[r.selected().min(1) as usize].into());
+        crate::apply_accent();
+    });
+    look.add(&accent);
     let clocks = ["system", "24h", "12h"];
     let clock = combo(
         "Time format",

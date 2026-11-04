@@ -294,6 +294,7 @@ fn has_popover(q: &Quick) -> bool {
 }
 
 fn show(q: &Rc<Quick>) {
+    crate::apply_accent(); // the preference may have changed while we waited in the background
     if crate::prefs::get().quick_clear_on_open {
         q.entry.set_text("");
     }

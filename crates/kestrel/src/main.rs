@@ -39,6 +39,16 @@ use window::Win;
 const CSS: &str = include_str!("style.css");
 /// Vantage's dark tokens, over CSS while libadwaita is dark.
 const CSS_DARK: &str = include_str!("style-dark.css");
+/// Kestrel lime instead of the system accent (Preferences › Accent colour).
+const CSS_ACCENT: &str = include_str!("style-accent.css");
+
+thread_local! {
+    static ACCENT: gtk::CssProvider = {
+        let p = gtk::CssProvider::new();
+        p.load_from_string(CSS_ACCENT);
+        p
+    };
+}
 
 /// Load Kestrel's stylesheet, and its dark tokens whenever libadwaita is dark (the Style
 /// preference, or the system's). One stylesheet per mode instead of a prefers-color-scheme query:
@@ -60,6 +70,19 @@ pub fn install_styles() {
     let style = adw::StyleManager::default();
     apply(style.is_dark());
     style.connect_dark_notify(move |s| apply(s.is_dark()));
+    apply_accent();
+}
+
+/// The accent in use: the system's (libadwaita's own, so it changes live with GNOME Settings), or
+/// Kestrel lime on top of it. Call again after the preference changes.
+pub fn apply_accent() {
+    let display = gdk::Display::default().unwrap();
+    ACCENT.with(|p| {
+        gtk::style_context_remove_provider_for_display(&display, p);
+        if prefs::get().accent == "kestrel" {
+            gtk::style_context_add_provider_for_display(&display, p, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+        }
+    });
 }
 
 const ACCELS: &[(&str, &[&str])] = &[
@@ -316,4 +339,22 @@ fn main() -> glib::ExitCode {
         }
     });
     app.run_with_args(&["kestrel"])
+}
+
+#[cfg(test)]
+mod style_tests {
+    /// Every var(--color-…) the stylesheets use is a token one of them declares, so a renamed
+    /// token can't silently drop a colour (GTK only warns at run time).
+    #[test]
+    fn style_tokens_are_declared() {
+        let all = [super::CSS, super::CSS_DARK, super::CSS_ACCENT].concat();
+        let declared: std::collections::HashSet<&str> =
+            all.match_indices("--color-").filter_map(|(i, _)| all[i..].split_once(':').map(|(n, _)| n)).filter(|n| !n.contains([' ', ')', ','])).collect();
+        for (i, _) in all.match_indices("var(--color-") {
+            let name = all[i + 4..].split([')', ',']).next().unwrap();
+            assert!(declared.contains(name), "{name} is used but never declared");
+        }
+        assert!(!super::CSS.contains("--accent-bg-color: var(--color-accent)"), "the system accent is the default: lime is only in style-accent.css");
+        assert!(super::CSS_ACCENT.contains("--accent-bg-color: var(--color-lime)"));
+    }
 }

@@ -3,6 +3,7 @@
  * axes: dark/grotesk-sans/system-accent · posture: restrained · contrast: pass · modes: light+dark · v2.0.0 */
 /* Hallmark · pre-emit critique: P3 H3 E4 S4 R3 V4 · weakest: H (hierarchy is libadwaita's), kept on purpose: the layout is the owner's at restyle depth */
 /* Hallmark · answered: 7 (reduced motion) GTK has no prefers-reduced-motion query; every transition here obeys gtk-enable-animations, which GNOME's Reduce Animation turns off */
+/* Hallmark · answered: accent follows the system by default (owner's choice, 0.9.41); Vantage's lime is Preferences › Accent colour › Kestrel Lime */
 /* Hallmark · answered: 64 (labels) Geologica throughout; the one mono use is file contents (text preview, terminal), which is code */
 
 /* Kestrel's look, in one place: Vantage tokens, then libadwaita's own colour variables pointed at
@@ -25,6 +26,8 @@
      both modes: Kestrel never sets its own, so blue, teal, red or any colour you pick shows here */
   --color-accent: var(--accent-bg-color); --color-accent-hi: color-mix(in srgb, var(--accent-bg-color) 85%, white);
   --color-accent-ink: var(--accent-fg-color); --color-accent-text: var(--accent-color); --color-focus: var(--accent-color);
+  /* Kestrel lime, only used when Preferences › Accent colour is Kestrel Lime (style-accent.css) */
+  --color-lime: oklch(86% 0.19 126); --color-lime-ink: oklch(22% 0.05 126); --color-lime-text: oklch(47% 0.13 132);
   --color-error: oklch(52% 0.17 27); --color-error-fill: oklch(58% 0.19 27); --color-error-ink: oklch(98% 0.01 27);
   --color-success: oklch(50% 0.12 150); --color-warning: oklch(58% 0.13 75);
   /* a document page (Markdown preview) stays a page, like a PDF, in either mode */
